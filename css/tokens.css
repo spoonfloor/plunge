@@ -25,6 +25,8 @@
   --caution-color: #8a5a00;  --caution-soft: #fbecc8;
   --high-color: #b3261e;     --high-soft: #fadcd9;
   --unknown-color: #5c5c5c;  --unknown-soft: #e6e6e6;
+  /* Fills for the hour strip: brighter than the text colors, which must stay readable. */
+  --low-bar: #3a9a54;  --caution-bar: #e3a008;  --high-bar: #d0342c;  --unknown-bar: #a3a3a3;
 
   --radius: 12px;
   --top-bar-height: 44px; /* must stay over 10px, see #top-bar in app.css */
@@ -42,5 +44,6 @@
     --caution-color: #f2c35b;  --caution-soft: #3d2f0e;
     --high-color: #ff8a80;     --high-soft: #45191a;
     --unknown-color: #b0b0b0;  --unknown-soft: #2c2c2c;
+    --low-bar: #6fd38c;  --caution-bar: #f2c35b;  --high-bar: #ff8a80;  --unknown-bar: #6b6b6b;
   }
 }

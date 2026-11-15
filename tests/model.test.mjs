@@ -1,7 +1,7 @@
 // node --test tests/
 import test from "node:test";
 import assert from "node:assert/strict";
-import { currentAt, peakCurrent, transferFactor, assessCurrent, assessWaves, overall } from "../js/model.js";
+import { currentAt, peakCurrent, transferFactor, assessCurrent, assessWaves, overall, summarizeDay, hourSpan } from "../js/model.js";
 import spot from "../js/spots/crissy-east.js";
 import { zonedToMs, zonedParts } from "../js/time.js";
 
@@ -56,4 +56,14 @@ test("local times convert in Los Angeles, across DST", () => {
   assert.equal(new Date(zonedToMs("2026-11-15 06:09", tz)).toISOString(), "2026-11-15T14:09:00.000Z");
   assert.equal(new Date(zonedToMs("2026-07-01 06:00", tz)).toISOString(), "2026-07-01T13:00:00.000Z");
   assert.deepEqual(zonedParts(Date.parse("2026-11-15T14:09:00Z"), tz), { date: "2026-11-15", hour: 6, minute: 9 });
+});
+
+test("day summary groups hours by rating", () => {
+  const h = (hour, level, drivers = []) => ({ hour, overall: { level, drivers } });
+  const day = [h(6, "low"), h(7, "low"), h(8, "high", ["wind"]), h(9, "high", ["wind", "waves"]),
+    h(10, "caution", ["current"]), h(11, "low")];
+  assert.equal(summarizeDay(day),
+    "Low 6–8 AM. High 8–10 AM, because of the wind and waves. Caution 10–11 AM, because of the current. Low 11 AM–12 PM.");
+  assert.equal(hourSpan(11, 13), "11 AM–1 PM");
+  assert.equal(hourSpan(13, 18), "1–6 PM");
 });

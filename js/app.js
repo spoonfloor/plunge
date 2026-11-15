@@ -3,7 +3,7 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 
 import spot from "./spots/crissy-east.js";
 import { loadAll } from "./sources.js";
-import { assessHour } from "./model.js";
+import { assessHour, summarizeDay } from "./model.js";
 import { hourLabel, zonedParts, zonedToMs } from "./time.js";
 
 const LABELS = { low: "Low", caution: "Caution", high: "High", unknown: "No rating" };
@@ -25,77 +25,59 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 
-let lastLoad = 0;
-let loading = false;
+const state = { date: null, hours: [], selected: null, lastLoad: 0, loading: false };
 
 async function refresh() {
-  if (loading) return;
-  loading = true;
+  if (state.loading) return;
+  state.loading = true;
   $("refresh").disabled = true;
   $("updated").textContent = "Updating…";
   const date = zonedParts(Date.now(), spot.timeZone).date;
   try {
     const { data, sources } = await loadAll(spot, date);
-    render(date, data, sources);
-    lastLoad = Date.now();
+    if (date !== state.date) state.selected = null; // a new day starts back at “now”
+    state.date = date;
+    state.hours = [];
+    for (let hour = spot.firstHour; hour <= spot.lastHour; hour++) {
+      state.hours.push(assessHour(hour, zonedToMs(`${date} ${hour}:00`, spot.timeZone), data, spot));
+    }
+    state.lastLoad = Date.now();
+    renderDay(data, sources);
+    renderHour();
   } finally {
-    loading = false;
+    state.loading = false;
     $("refresh").disabled = false;
   }
 }
 
-function render(date, data, sources) {
+// Where “now” falls in today’s window: the current hour, or the nearest end of it.
+function nowHour() {
   const now = zonedParts(Date.now(), spot.timeZone);
-  const [y, m, d] = date.split("-").map(Number);
-  $("date").textContent = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "long", day: "numeric" })
-    .format(Date.UTC(y, m - 1, d)) + ` · ${spot.name}`;
+  if (now.date !== state.date) return null;
+  return Math.min(spot.lastHour, Math.max(spot.firstHour, now.hour));
+}
+function isPast(hour) {
+  const now = zonedParts(Date.now(), spot.timeZone);
+  return now.date === state.date && hour < now.hour;
+}
 
+function renderDay(data, sources) {
   const stale = sources.filter(s => s.stale);
   $("updated").textContent = stale.length
     ? `Partly offline · ${clock(Math.min(...stale.map(s => s.fetchedAt)))}`
     : `Updated ${clock(Date.now())}`;
 
-  const dayStart = zonedToMs(`${date} ${spot.firstHour}:00`, spot.timeZone);
-  const dayEnd = zonedToMs(`${date} ${spot.lastHour + 1}:00`, spot.timeZone);
-  $("alerts").replaceChildren(...(data.alerts ?? [])
-    .filter(a => a.onsetMs < dayEnd && (!a.endsMs || a.endsMs > dayStart))
-    .map(a => el("div", { class: "alert" },
-      el("strong", {}, `NWS ${a.event}`),
-      el("p", {}, `${a.endsMs ? `Until ${dayAndHour(a.endsMs)}. ` : ""}Covers ${a.areas}.`),
-      el("p", {}, "A regional warning, shown for comparison. The ratings below are for this beach."))));
+  $("summary").textContent = summarizeDay(state.hours);
 
-  // Keep rows the person opened open across refreshes; first time, open the current hour.
-  const wasOpen = new Set([...document.querySelectorAll("#hours details[open]")].map(x => Number(x.dataset.hour)));
-  const firstRender = !$("hours").children.length;
-
-  const rows = [];
-  for (let hour = spot.firstHour; hour <= spot.lastHour; hour++) {
-    const r = assessHour(hour, zonedToMs(`${date} ${hour}:00`, spot.timeZone), data, spot);
-    const isNow = now.date === date && now.hour === hour;
-    const isPast = now.date === date && hour < now.hour;
-    const open = wasOpen.has(hour) || (firstRender && isNow);
-    const glance = ["current", "waves", "wind"].map(k => r.factors[k])
-      .map(f => f.level === "unknown" ? "–" : f.value.replace(/ at the beach$/, "")).join(" · ");
-    rows.push(el("li", { class: isPast ? "past" : null },
-      el("details", { "data-hour": hour, open },
-        el("summary", {},
-          el("span", { class: "time" }, isNow ? el("small", {}, "Now") : null, hourLabel(hour)),
-          el("span", { class: "chip", "data-level": r.overall.level }, LABELS[r.overall.level]),
-          el("span", { class: "glance" }, glance)),
-        el("div", { class: "detail" },
-          el("p", {}, r.overall.why),
-          el("ul", { class: "factors" }, FACTORS.map(([key, name]) => {
-            const f = r.factors[key];
-            return el("li", { "data-level": f.level },
-              el("span", { class: "dot", "aria-hidden": "true" }),
-              el("div", {},
-                el("div", { class: "head" },
-                  el("span", {}, `${name}${f.level in LABELS && f.level !== "unknown" ? ` · ${LABELS[f.level]}` : ""}`),
-                  el("span", {}, f.value)),
-                el("p", {}, f.why)));
-          }))))));
-  }
-  $("hours").replaceChildren(...rows);
+  const dayStart = zonedToMs(`${state.date} ${spot.firstHour}:00`, spot.timeZone);
+  const dayEnd = zonedToMs(`${state.date} ${spot.lastHour + 1}:00`, spot.timeZone);
+  const alerts = (data.alerts ?? []).filter(a => a.onsetMs < dayEnd && (!a.endsMs || a.endsMs > dayStart));
+  $("alerts-more").hidden = !alerts.length;
+  $("alerts-title").textContent = alerts.length === 1 ? `NWS ${alerts[0].event}` : `${alerts.length} NWS alerts`;
+  $("alerts").replaceChildren(...alerts.map(a => el("div", { class: "alert" },
+    alerts.length > 1 ? el("p", {}, el("strong", {}, a.event)) : null,
+    el("p", {}, `${a.endsMs ? `Until ${dayAndHour(a.endsMs)}. ` : ""}Covers ${a.areas}.`),
+    el("p", {}, "A regional warning, shown for comparison. The ratings above are for this beach."))));
 
   $("sources").replaceChildren(...sources.map(s => el("li", {},
     s.link ? el("a", { href: s.link, target: "_blank", rel: "noopener" }, s.label) : s.label,
@@ -104,11 +86,46 @@ function render(date, data, sources) {
       : ` · ${clock(s.fetchedAt)}`)));
 }
 
+// Hero, strip selection and factor cards for the selected hour.
+function renderHour() {
+  const current = nowHour();
+  const selected = state.selected ?? current ?? spot.firstHour;
+  const r = state.hours.find(h => h.hour === selected);
+
+  $("hero").dataset.level = r.overall.level;
+  $("hero-when").textContent = selected === current && !isPast(selected) ? `Now · ${hourLabel(selected)}` : hourLabel(selected);
+  $("hero-level").textContent = LABELS[r.overall.level];
+  $("hero-why").textContent = r.overall.why;
+
+  $("strip").style.setProperty("--hours", state.hours.length);
+  $("strip").replaceChildren(...state.hours.map(h => {
+    const label = hourLabel(h.hour);
+    const button = el("button", {
+      type: "button", "data-level": h.overall.level, "aria-pressed": String(h.hour === selected),
+      "aria-label": `${label}, ${LABELS[h.overall.level]}`,
+      class: [h.hour === current && !isPast(h.hour) ? "now" : "", isPast(h.hour) ? "past" : ""].join(" ").trim() || null,
+    },
+      el("span", { class: "bar", "aria-hidden": "true" }),
+      el("span", { class: "label", "aria-hidden": "true" }, label.split(" ")[0]));
+    button.addEventListener("click", () => { state.selected = h.hour; renderHour(); });
+    return button;
+  }));
+
+  $("factors").replaceChildren(...FACTORS.map(([key, name]) => {
+    const f = r.factors[key];
+    const rated = f.level in LABELS && f.level !== "unknown";
+    return el("li", { "data-level": f.level },
+      el("p", { class: "name" }, el("span", {}, name), rated ? el("span", { class: "rating" }, LABELS[f.level]) : null),
+      el("p", { class: "value" }, f.value.replace(/ at the beach$/, "")),
+      el("p", { class: "why" }, f.why));
+  }));
+}
+
 $("water-quality").href = spot.links.waterQuality;
 $("water-quality").target = "_blank";
 $("refresh").addEventListener("click", refresh);
 // Coming back to the app after a while (or the next morning) loads fresh data.
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && Date.now() - lastLoad > REFRESH_AFTER_MS) refresh();
+  if (document.visibilityState === "visible" && Date.now() - state.lastLoad > REFRESH_AFTER_MS) refresh();
 });
 refresh();

@@ -31,56 +31,66 @@ main { box-sizing: border-box; max-width: 640px; margin: 0 auto;
 
 #top-bar { justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line-color); }
 #top-bar h1 { margin: 0; font-size: 17px; font-weight: 600; }
-#refresh { border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 14px;
+#refresh { border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 15px;
   padding: 8px 0 8px 8px; cursor: pointer; }
 #refresh:disabled { opacity: 0.6; }
 
-.eyebrow { margin: 8px 0 12px; color: var(--text-muted); font-size: 14px; }
 h2 { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
 a { color: var(--accent-color); }
+.eyebrow { margin: 0; color: var(--text-muted); font-size: 15px; font-weight: 500; }
+.card { background: var(--surface-color); border-radius: var(--radius); }
 
-/* The regional warning, shown for contrast with the spot rating. */
-.alert { background: var(--surface-color); border-radius: var(--radius); padding: 12px 14px;
-  margin-bottom: 16px; font-size: 14px; line-height: 1.45; }
-.alert strong { display: block; font-size: 15px; margin-bottom: 2px; }
-.alert p { margin: 4px 0 0; color: var(--text-muted); }
+/* Risk levels. Elements set data-level; children use --chip-color / --chip-soft. */
+[data-level="low"] { --chip-color: var(--low-color); --chip-soft: var(--low-soft); --chip-bar: var(--low-bar); }
+[data-level="caution"] { --chip-color: var(--caution-color); --chip-soft: var(--caution-soft); --chip-bar: var(--caution-bar); }
+[data-level="high"] { --chip-color: var(--high-color); --chip-soft: var(--high-soft); --chip-bar: var(--high-bar); }
+[data-level="unknown"], [data-level="info"] { --chip-color: var(--unknown-color); --chip-soft: var(--unknown-soft); --chip-bar: var(--unknown-bar); }
 
-/* Hour rows. Each is a native <details>: tap to see why. */
-#hours { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line-color); }
-#hours > li { border-bottom: 1px solid var(--line-color); }
-#hours > li.past { opacity: 0.55; }
-#hours summary { list-style: none; display: grid; grid-template-columns: 52px auto 1fr; align-items: center;
-  gap: 10px; padding: 12px 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-#hours summary::-webkit-details-marker { display: none; }
-.time { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 15px; }
-.time small { display: block; font-size: 11px; font-weight: 600; color: var(--accent-color);
-  text-transform: uppercase; letter-spacing: 0.04em; }
-.glance { color: var(--text-muted); font-size: 13px; font-variant-numeric: tabular-nums;
-  text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The selected hour, big. */
+#hero { padding: 20px 0 16px; }
+.level-word { margin: 2px 0 4px; font-size: 56px; line-height: 1.05; font-weight: 700;
+  letter-spacing: -0.02em; color: var(--chip-color, var(--text-color)); }
+#hero-why { margin: 0; font-size: 17px; line-height: 1.4; }
 
-.chip { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 13px; font-weight: 600;
-  background: var(--chip-soft); color: var(--chip-color); white-space: nowrap; }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--chip-color); flex: none; margin-top: 6px; }
-[data-level="low"] { --chip-color: var(--low-color); --chip-soft: var(--low-soft); }
-[data-level="caution"] { --chip-color: var(--caution-color); --chip-soft: var(--caution-soft); }
-[data-level="high"] { --chip-color: var(--high-color); --chip-soft: var(--high-soft); }
-[data-level="unknown"], [data-level="info"] { --chip-color: var(--unknown-color); --chip-soft: var(--unknown-soft); }
-[data-level="info"] .dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--unknown-color); }
+/* One column per hour, colored by rating. Tap to select. */
+#strip { display: grid; grid-template-columns: repeat(var(--hours, 12), 1fr); gap: 3px; margin-bottom: 20px; }
+#strip button { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0;
+  border: 0; background: none; color: var(--text-muted); font: inherit; cursor: pointer; min-height: 64px; }
+#strip .bar { width: 100%; height: 40px; border-radius: 6px; background: var(--chip-bar);
+  box-sizing: border-box; }
+#strip .past .bar { opacity: 0.4; }
+#strip .label { font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1; }
+#strip .now .label { color: var(--accent-color); font-weight: 700; }
+#strip [aria-pressed="true"] .bar { box-shadow: 0 0 0 2px var(--page-color), 0 0 0 4px var(--text-color); }
+#strip [aria-pressed="true"] .label { color: var(--text-color); font-weight: 700; }
+#strip button:focus-visible { outline: none; }
+#strip button:focus-visible .bar { box-shadow: 0 0 0 2px var(--page-color), 0 0 0 4px var(--accent-color); }
 
-.detail { padding: 0 0 14px; font-size: 14px; line-height: 1.45; }
-.detail > p { margin: 0 0 10px; }
-.factors { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-.factors li { display: flex; gap: 10px; }
-.factors .head { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
-.factors .head span:last-child { font-variant-numeric: tabular-nums; }
-.factors p { margin: 2px 0 0; color: var(--text-muted); }
-.factors > li > div { flex: 1; min-width: 0; }
+#summary { margin: 0 0 20px; padding: 14px 16px; font-size: 17px; line-height: 1.45; }
 
-.notes { margin-top: 28px; font-size: 14px; line-height: 1.45; }
-.notes p { margin: 0 0 8px; color: var(--text-muted); }
-.notes strong { color: var(--text-color); font-weight: 600; }
-#sources { list-style: none; margin: 0; padding: 0; color: var(--text-muted); }
-#sources li { margin-bottom: 6px; }
+/* Factor cards for the selected hour. */
+#factors { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+#factors li { background: var(--surface-color); border-radius: var(--radius); padding: 14px 16px; }
+#factors .name { display: flex; justify-content: space-between; gap: 8px; margin: 0;
+  font-size: 15px; font-weight: 600; color: var(--text-muted); }
+#factors .rating { color: var(--chip-color); }
+#factors .value { margin: 2px 0 6px; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em; }
+#factors .why { margin: 0; font-size: 15px; line-height: 1.45; color: var(--text-muted); }
+
+/* Collapsed extras at the bottom. */
+.more { margin-top: 12px; border-top: 1px solid var(--line-color); font-size: 15px; line-height: 1.45; }
+.more:first-of-type { margin-top: 28px; }
+.more summary { padding: 14px 0; font-size: 17px; font-weight: 600; cursor: pointer; list-style: none;
+  display: flex; justify-content: space-between; }
+.more summary::-webkit-details-marker { display: none; }
+.more summary::after { content: "+"; color: var(--text-muted); font-weight: 400; }
+.more[open] summary::after { content: "–"; }
+.more p { margin: 0 0 10px; color: var(--text-muted); }
+.more strong { color: var(--text-color); font-weight: 600; }
+.alert p { margin: 0 0 8px; }
+#sources { list-style: none; margin: 0 0 12px; padding: 0; color: var(--text-muted); }
+#sources li { margin-bottom: 8px; }
 #sources .problem { color: var(--high-color); }
 
 /* Tappable controls: no double-tap zoom delay, no long-press callout or text selection. */

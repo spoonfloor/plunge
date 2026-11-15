@@ -1,5 +1,7 @@
 // The risk model. Pure functions: data in, hourly assessment out. No fetching, no DOM.
 
+import { hourLabel } from "./time.js";
+
 const KNOT_MS = 0.514444;
 const G = 9.81;
 const RANK = { low: 0, caution: 1, high: 2 };
@@ -137,17 +139,52 @@ const CRITICAL = ["current", "waves"];
 export function overall(factors) {
   const missing = CRITICAL.filter(k => factors[k].level === "unknown");
   if (missing.length) {
-    return { level: "unknown", why: `No rating: ${missing.map(k => NAMES[k]).join(" and ")} data is missing.` };
+    return { level: "unknown", drivers: missing, why: `No rating: ${missing.map(k => NAMES[k]).join(" and ")} data is missing.` };
   }
   const scored = Object.keys(NAMES).filter(k => factors[k].level in RANK);
   if (factors.current.level === "caution" && factors.waves.level === "caution") {
-    return { level: "high", why: "Current and wave surge are both moderate. Together they push harder than either alone." };
+    return { level: "high", drivers: ["current", "waves"],
+      why: "Current and wave surge are both moderate. Together they push harder than either alone." };
   }
   const worst = Math.max(...scored.map(k => RANK[factors[k].level]));
   const level = Object.keys(RANK).find(l => RANK[l] === worst);
-  if (level === "low") return { level, why: "Nothing stands out." };
-  const drivers = scored.filter(k => RANK[factors[k].level] === worst).map(k => NAMES[k]);
-  return { level, why: `Because of the ${list(drivers)}.` };
+  if (level === "low") return { level, drivers: [], why: "Nothing stands out." };
+  const drivers = scored.filter(k => RANK[factors[k].level] === worst);
+  return { level, drivers, why: `Because of the ${list(drivers.map(k => NAMES[k]))}.` };
+}
+
+// ---- The day in a sentence or three -------------------------------------------------
+
+const LEVEL_WORDS = { low: "Low", caution: "Caution", high: "High", unknown: "No rating" };
+
+// “Low 6 AM–1 PM. High 1–3 PM, because of the wind. Caution 3–6 PM, …”
+// hours: assessHour results in time order.
+export function summarizeDay(hours) {
+  const runs = [];
+  for (const h of hours) {
+    const last = runs.at(-1);
+    if (last && last.level === h.overall.level && last.to === h.hour) {
+      last.to = h.hour + 1;
+      for (const d of h.overall.drivers) if (!last.drivers.includes(d)) last.drivers.push(d);
+    } else {
+      runs.push({ level: h.overall.level, from: h.hour, to: h.hour + 1, drivers: [...h.overall.drivers] });
+    }
+  }
+  return runs.map(r => {
+    const span = hourSpan(r.from, r.to);
+    if (r.level === "low") return `Low ${span}.`;
+    const what = list(r.drivers.map(k => NAMES[k]));
+    return r.level === "unknown"
+      ? `No rating ${span}: missing ${what} data.`
+      : `${LEVEL_WORDS[r.level]} ${span}, because of the ${what}.`;
+  }).join(" ");
+}
+
+// 13, 15 → “1–3 PM”; 6, 13 → “6 AM–1 PM”.
+export function hourSpan(from, to) {
+  const [a, b] = [hourLabel(from), hourLabel(to)];
+  const meridiem = x => x.slice(-2);
+  return meridiem(a) === meridiem(b) ? `${a.slice(0, -3)}–${b}` : `${a}–${b}`;
 }
 
 // ---- Helpers -----------------------------------------------------------------------
