@@ -12,13 +12,12 @@ html, body { margin: 0; background: var(--page-color); color: var(--text-color);
 /* No rubber-band bounce revealing blank space past the page edges. */
 body { overscroll-behavior: none; }
 
-/* Fills the visible screen below the top bar. 100dvh follows Safari’s collapsing toolbars
-   (100vh overshoots them). The safe-area padding keeps content clear of the notch,
+/* Everything below the top bar. The safe-area padding keeps content clear of the notch,
    Dynamic Island and home indicator wherever the page draws under them
    (viewport-fit=cover; in landscape, for example). */
-main { box-sizing: border-box; min-height: 100dvh; display: grid; place-items: center;
-  padding: calc(env(safe-area-inset-top) + var(--top-bar-height)) max(16px, env(safe-area-inset-right))
-           env(safe-area-inset-bottom) max(16px, env(safe-area-inset-left)); }
+main { box-sizing: border-box; max-width: 640px; margin: 0 auto;
+  padding: calc(env(safe-area-inset-top) + var(--top-bar-height) + 8px) max(16px, env(safe-area-inset-right))
+           calc(env(safe-area-inset-bottom) + 32px) max(16px, env(safe-area-inset-left)); }
 
 /* The app’s top bar. Keep it fixed, full width, opaque and over 10px tall: iOS then
    paints the status bar in its color, and on iOS 27 that’s also what stops iOS blurring
@@ -30,12 +29,59 @@ main { box-sizing: border-box; min-height: 100dvh; display: grid; place-items: c
   padding: env(safe-area-inset-top) max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
   display: flex; align-items: center; background: var(--page-color); }
 
-#hello { width: var(--content-width); box-sizing: border-box; padding: 16px 20px; border: 0;
-  border-radius: var(--radius); background: var(--accent-color); color: var(--accent-text-color);
-  font: inherit; font-size: 22px; font-weight: 500; cursor: pointer;
-  transition: transform 80ms ease-out; }
-#hello:active { transform: scale(0.97); }
-#hello:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 3px; }
+#top-bar { justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line-color); }
+#top-bar h1 { margin: 0; font-size: 17px; font-weight: 600; }
+#refresh { border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 14px;
+  padding: 8px 0 8px 8px; cursor: pointer; }
+#refresh:disabled { opacity: 0.6; }
+
+.eyebrow { margin: 8px 0 12px; color: var(--text-muted); font-size: 14px; }
+h2 { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
+a { color: var(--accent-color); }
+
+/* The regional warning, shown for contrast with the spot rating. */
+.alert { background: var(--surface-color); border-radius: var(--radius); padding: 12px 14px;
+  margin-bottom: 16px; font-size: 14px; line-height: 1.45; }
+.alert strong { display: block; font-size: 15px; margin-bottom: 2px; }
+.alert p { margin: 4px 0 0; color: var(--text-muted); }
+
+/* Hour rows. Each is a native <details>: tap to see why. */
+#hours { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line-color); }
+#hours > li { border-bottom: 1px solid var(--line-color); }
+#hours > li.past { opacity: 0.55; }
+#hours summary { list-style: none; display: grid; grid-template-columns: 52px auto 1fr; align-items: center;
+  gap: 10px; padding: 12px 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+#hours summary::-webkit-details-marker { display: none; }
+.time { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 15px; }
+.time small { display: block; font-size: 11px; font-weight: 600; color: var(--accent-color);
+  text-transform: uppercase; letter-spacing: 0.04em; }
+.glance { color: var(--text-muted); font-size: 13px; font-variant-numeric: tabular-nums;
+  text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.chip { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 13px; font-weight: 600;
+  background: var(--chip-soft); color: var(--chip-color); white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--chip-color); flex: none; margin-top: 6px; }
+[data-level="low"] { --chip-color: var(--low-color); --chip-soft: var(--low-soft); }
+[data-level="caution"] { --chip-color: var(--caution-color); --chip-soft: var(--caution-soft); }
+[data-level="high"] { --chip-color: var(--high-color); --chip-soft: var(--high-soft); }
+[data-level="unknown"], [data-level="info"] { --chip-color: var(--unknown-color); --chip-soft: var(--unknown-soft); }
+[data-level="info"] .dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--unknown-color); }
+
+.detail { padding: 0 0 14px; font-size: 14px; line-height: 1.45; }
+.detail > p { margin: 0 0 10px; }
+.factors { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.factors li { display: flex; gap: 10px; }
+.factors .head { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
+.factors .head span:last-child { font-variant-numeric: tabular-nums; }
+.factors p { margin: 2px 0 0; color: var(--text-muted); }
+.factors > li > div { flex: 1; min-width: 0; }
+
+.notes { margin-top: 28px; font-size: 14px; line-height: 1.45; }
+.notes p { margin: 0 0 8px; color: var(--text-muted); }
+.notes strong { color: var(--text-color); font-weight: 600; }
+#sources { list-style: none; margin: 0; padding: 0; color: var(--text-muted); }
+#sources li { margin-bottom: 6px; }
+#sources .problem { color: var(--high-color); }
 
 /* Tappable controls: no double-tap zoom delay, no long-press callout or text selection. */
 button { touch-action: manipulation; -webkit-touch-callout: none;

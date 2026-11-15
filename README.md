@@ -1,38 +1,50 @@
-# PWA template
+# Plunge
 
-A starting point for small iPhone-first web apps. It installs to the Home Screen, works offline, and follows the system’s light or dark mode. No build step and no dependencies; you only need Node and, for the icons, Google Chrome.
+How risky is it to wade chest deep at Crissy Field East Beach today? An hour-by-hour rating from 6 AM to 5 PM, with each factor and the reason behind it. Built because NWS warnings cover whole stretches of coast, not this beach.
 
-## Start a new app
+Live at https://spoonfloor.github.io/plunge/. Install it from Safari with Share → Add to Home Screen.
 
-1. Copy the template without its git history:
-   ```bash
-   rsync -a --exclude .git ~/Desktop/pwa-template/ ~/Desktop/my-app && cd ~/Desktop/my-app && git init
-   ```
-2. Edit `app.config.json`, replace `icons/source.svg`, then apply both:
-   ```bash
-   node dev/configure.mjs
-   ```
-3. Run the dev server, which reloads on save, and open http://127.0.0.1:5180/:
-   ```bash
-   node dev/serve.mjs
-   ```
+## How the rating works
+
+What knocks a chest-deep wader off their feet is moving water, so **current** and **waves** drive the rating. **Wind** and **water temperature** can raise it. **Tide** is shown but not scored. An hour takes its worst factor’s level, and moderate current plus moderate waves together count as high. With no current or wave data, the hour gets no rating instead of a misleading one.
+
+| Factor | Source | How it’s turned into a level |
+|---|---|---|
+| Current | NOAA predictions, Fort Point 0.5 nmi E (PCT0286) | Interpolated between slack and max, peak within the hour, scaled to the beach, then depth × speed against the 0.6 m²/s adult stability limit |
+| Waves | Open-Meteo marine forecast, offshore of the Gate | Each swell scaled by how well its period and direction get through the Gate |
+| Wind | NOAA measured (past hours), NWS forecast (later hours) | Sustained speed |
+| Water temperature | NOAA, San Francisco (9414290) | Under 50°F is a caution |
+| Tide | NOAA, San Francisco (9414290) | Shown only |
+
+The NWS alerts for the point appear above the hours for comparison. They don’t feed the rating.
+
+The beach scaling for current and waves is a starting guess (`js/spots/crissy-east.js`), not yet tuned against real sessions.
 
 ## What’s where
 
 | File | What it’s for |
 |---|---|
-| `app.config.json` | Name, Home Screen name, accent and page colors, icon. The one place to set them. |
-| `index.html` | The page and the iPhone `<head>` tags |
-| `css/tokens.css` | Design tokens: light by default, dark overrides |
-| `css/app.css` | Layout: full-screen, safe areas, touch behavior |
-| `js/app.js` | App code. Registers the service worker. |
-| `sw.js` | Offline support |
-| `icons/source.svg` | The icon every PNG is rendered from |
-| `dev/configure.mjs` | Writes the config into the manifest, `<head>`, tokens and `sw.js`, then renders the icons |
-| `dev/serve.mjs` | Dev server with live reload; changes to CSS apply without a reload |
-| `dev/make-icons.mjs` | Renders the icons (`configure` runs it for you) |
+| `js/spots/crissy-east.js` | Everything specific to the beach: location, stations, scaling, thresholds. A new spot is a new file. |
+| `js/sources.js` | Fetches and normalizes each source. Each fails on its own, and falls back to today’s last good copy on this device. |
+| `js/model.js` | The risk model. Pure functions, tested in `tests/`. |
+| `js/app.js` | Renders the page |
+| `js/time.js` | Times in the beach’s time zone, whatever the phone’s zone |
 
-Blocks marked `config` in `index.html`, `css/tokens.css` and `sw.js`, and all of `manifest.webmanifest`, are rewritten by `configure`. Edit `app.config.json` instead.
+Built from [pwa-template](https://github.com/spoonfloor/pwa-template). `app.config.json`, `dev/configure.mjs` and the files below work as they do there.
+
+## Develop
+
+Dev server with live reload, at http://127.0.0.1:5180/:
+```bash
+node dev/serve.mjs
+```
+
+Model tests:
+```bash
+node --test tests/*.test.mjs
+```
+
+Pushing to `main` publishes to GitHub Pages.
 
 ## Good to know
 

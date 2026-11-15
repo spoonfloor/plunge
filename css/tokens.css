@@ -18,6 +18,14 @@
   --accent-color: var(--config-accent);
   --accent-text-color: white;
 
+  --line-color: color-mix(in srgb, var(--text-color), transparent 88%);
+
+  /* Risk levels: a strong color for dots and text, a soft one for chip backgrounds. */
+  --low-color: #1f7a3a;      --low-soft: #dcf2e2;
+  --caution-color: #8a5a00;  --caution-soft: #fbecc8;
+  --high-color: #b3261e;     --high-soft: #fadcd9;
+  --unknown-color: #5c5c5c;  --unknown-soft: #e6e6e6;
+
   --radius: 12px;
   --top-bar-height: 44px; /* must stay over 10px, see #top-bar in app.css */
   --content-width: min(340px, calc(100vw - 32px));
@@ -30,5 +38,9 @@
     --surface-color: color-mix(in srgb, var(--page-color), white 10%);
     --text-color: #eeeeee;
     --text-muted: #a3a3a3;
+    --low-color: #6fd38c;      --low-soft: #173a22;
+    --caution-color: #f2c35b;  --caution-soft: #3d2f0e;
+    --high-color: #ff8a80;     --high-soft: #45191a;
+    --unknown-color: #b0b0b0;  --unknown-soft: #2c2c2c;
   }
 }
