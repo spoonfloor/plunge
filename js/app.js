@@ -78,12 +78,6 @@ function renderDay(data, sources) {
     alerts.length > 1 ? el("p", {}, el("strong", {}, a.event)) : null,
     el("p", {}, `${a.endsMs ? `Until ${dayAndHour(a.endsMs)}. ` : ""}Covers ${a.areas}.`),
     el("p", {}, "A regional warning, shown for comparison. The ratings above are for this beach."))));
-
-  $("sources").replaceChildren(...sources.map(s => el("li", {},
-    s.link ? el("a", { href: s.link, target: "_blank", rel: "noopener" }, s.label) : s.label,
-    s.error && !s.stale ? el("span", { class: "problem" }, ` · Unavailable: ${s.error}`)
-      : s.stale ? el("span", { class: "problem" }, ` · Couldn’t update; showing copy from ${clock(s.fetchedAt)}`)
-      : ` · ${clock(s.fetchedAt)}`)));
 }
 
 // Hero, strip selection and factor cards for the selected hour.
@@ -121,8 +115,6 @@ function renderHour() {
   }));
 }
 
-$("water-quality").href = spot.links.waterQuality;
-$("water-quality").target = "_blank";
 $("refresh").addEventListener("click", refresh);
 // Coming back to the app after a while (or the next morning) loads fresh data.
 document.addEventListener("visibilitychange", () => {

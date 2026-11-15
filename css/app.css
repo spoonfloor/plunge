@@ -87,11 +87,7 @@ a { color: var(--accent-color); }
 .more summary::after { content: "+"; color: var(--text-muted); font-weight: 400; }
 .more[open] summary::after { content: "–"; }
 .more p { margin: 0 0 10px; color: var(--text-muted); }
-.more strong { color: var(--text-color); font-weight: 600; }
 .alert p { margin: 0 0 8px; }
-#sources { list-style: none; margin: 0 0 12px; padding: 0; color: var(--text-muted); }
-#sources li { margin-bottom: 8px; }
-#sources .problem { color: var(--high-color); }
 
 /* Tappable controls: no double-tap zoom delay, no long-press callout or text selection. */
 button { touch-action: manipulation; -webkit-touch-callout: none;
