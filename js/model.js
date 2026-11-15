@@ -99,8 +99,9 @@ export function assessWaterTemp(temp, spot) {
   const level = temp.f < spot.thresholds.waterTempF.caution ? "caution" : "low";
   return {
     level, value: `${Math.round(temp.f)}°F`,
-    why: `Measured ${Math.round(temp.f)}°F. ${level === "caution"
-      ? "Cold enough that the gasp reflex on entry is a hazard by itself." : "Cold, so enter slowly."}`,
+    why: `Measured ${Math.round(temp.f)}°F${temp.where ? ` at ${temp.where}` : ""}. ${level === "caution"
+      ? "Cold enough that the gasp reflex on entry is a hazard by itself."
+      : temp.f < 60 ? "Cold, so enter slowly." : "Mild for San Francisco."}`,
   };
 }
 

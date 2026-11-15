@@ -5,6 +5,8 @@
 import { addDays, compact, zonedParts, zonedToMs } from "./time.js";
 
 const COOPS = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter";
+// Plunge’s server function (server/functions/plunge), for sources browsers can’t read.
+const SERVER = "https://supabase.erichenry.com/functions/v1/plunge";
 const COOPS_COMMON = { units: "english", time_zone: "lst_ldt", format: "json", application: "plunge" };
 
 async function getJson(url) {
@@ -45,16 +47,32 @@ const FETCHERS = {
       link: `https://tidesandcurrents.noaa.gov/stationhome.html?id=${station}` };
   },
 
+  // The Presidio station sits inside the Bay, closest to the beach. When it has no
+  // recent reading, fall back to the SF Bar buoy outside the Gate, read through
+  // Plunge’s server function (NDBC doesn’t allow browsers to read it directly).
   async waterTemp(spot) {
     const { station, stationName } = spot.waterTemp;
-    const json = await getJson(withQuery(COOPS, {
-      ...COOPS_COMMON, product: "water_temperature", station, date: "latest",
-    }));
-    const reading = json.data?.[0];
-    const ms = reading && zonedToMs(reading.t, spot.timeZone);
-    if (!reading || Date.now() - ms > 24 * 3600e3) throw new Error("No reading in the last 24 hours");
-    return { data: { f: Number(reading.v), ms }, label: `NOAA water temperature, ${stationName} (${station})`,
-      link: `https://tidesandcurrents.noaa.gov/stationhome.html?id=${station}` };
+    const fresh = ms => Date.now() - ms < 24 * 3600e3;
+    let presidioError;
+    try {
+      const json = await getJson(withQuery(COOPS, {
+        ...COOPS_COMMON, product: "water_temperature", station, date: "latest",
+      }));
+      const reading = json.data?.[0];
+      const ms = reading && zonedToMs(reading.t, spot.timeZone);
+      if (reading && fresh(ms)) {
+        return { data: { f: Number(reading.v), ms, where: stationName }, label: `NOAA water temperature, ${stationName} (${station})`,
+          link: `https://tidesandcurrents.noaa.gov/stationhome.html?id=${station}` };
+      }
+      presidioError = "no reading in the last 24 hours";
+    } catch (err) { presidioError = err.message; }
+
+    const buoy = await getJson(`${SERVER}/water-temp`);
+    const ms = Date.parse(buoy.observedAt);
+    if (!fresh(ms)) throw new Error("No reading in the last 24 hours");
+    return { data: { f: buoy.fahrenheit, ms, where: `${buoy.name} buoy, outside the Gate` },
+      label: `NDBC water temperature, ${buoy.name} buoy (${buoy.station}), standing in for ${stationName} (${presidioError})`,
+      link: `https://www.ndbc.noaa.gov/station_page.php?station=${buoy.station}` };
   },
 
   async waves(spot, date) {
