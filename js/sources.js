@@ -123,6 +123,33 @@ const FETCHERS = {
       link: `https://tidesandcurrents.noaa.gov/stationhome.html?id=${station}` };
   },
 
+  // SFPUC beach postings, the feed behind https://webapps.sfpuc.org/sapps/beachesandbay.html.
+  // XML wrapping a JSON array of stations.
+  async waterQuality(spot) {
+    const res = await fetch("https://infrastructure.sfwater.org/lims.asmx/getBeaches");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const xml = await res.text();
+    const inner = xml.match(/<string[^>]*>([\s\S]*)<\/string>/)?.[1];
+    if (!inner) throw new Error("Unexpected response");
+    const decoded = inner.replace(/&(quot|amp|lt|gt|apos|#39);/g, (_, e) =>
+      ({ quot: '"', amp: "&", lt: "<", gt: ">", apos: "'", "#39": "'" })[e]);
+    const station = JSON.parse(decoded).find(x => x.stationid === spot.waterQuality.station);
+    if (!station) throw new Error(`Station ${spot.waterQuality.station} not in the feed`);
+    const [m, d, y] = (station.sample_date ?? "").split("/").map(Number);
+    return {
+      data: {
+        // Same rules as the SFPUC page: a red status, a posted sign or a sewer
+        // discharge means posted; yellow or white means not sampled.
+        status: station.s_color === "R" || station.cso || (station.posted && ["R", "G"].includes(station.p_color)) ? "posted"
+          : station.s_color === "Y" || station.s_color === "W" ? "unsampled"
+          : "clean",
+        sampled: m ? `20${String(y).padStart(2, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null,
+      },
+      label: `SFPUC beach water quality, ${spot.waterQuality.stationName}`,
+      link: "https://webapps.sfpuc.org/sapps/beachesandbay.html",
+    };
+  },
+
   // The blanket warnings, shown for comparison. They don’t feed the rating.
   async alerts(spot) {
     const json = await getJson(`https://api.weather.gov/alerts/active?point=${spot.lat},${spot.lon}`);
@@ -139,7 +166,8 @@ const FETCHERS = {
 const NAMES = {
   currents: "NOAA current predictions", tide: "NOAA tide predictions",
   waterTemp: "NOAA water temperature", waves: "Open-Meteo marine forecast",
-  wind: "National Weather Service hourly forecast", windObserved: "NOAA measured wind", alerts: "National Weather Service active alerts",
+  wind: "National Weather Service hourly forecast", windObserved: "NOAA measured wind",
+  waterQuality: "SFPUC beach water quality", alerts: "National Weather Service active alerts",
 };
 
 const cacheKey = (spot, key) => `plunge:${spot.id}:${key}`;

@@ -9,7 +9,7 @@ import { hourLabel, zonedParts, zonedToMs } from "./time.js";
 const LABELS = { low: "Low", caution: "Caution", high: "High", unknown: "No rating" };
 const FACTORS = [
   ["current", "Current"], ["waves", "Waves"], ["wind", "Wind"],
-  ["waterTemp", "Water temperature"], ["tide", "Tide"],
+  ["waterQuality", "Water quality"], ["waterTemp", "Water temperature"], ["tide", "Tide"],
 ];
 const REFRESH_AFTER_MS = 15 * 60e3;
 

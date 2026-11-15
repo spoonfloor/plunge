@@ -6,14 +6,15 @@ Live at https://spoonfloor.github.io/plunge/. Install it from Safari with Share 
 
 ## How the rating works
 
-What knocks a chest-deep wader off their feet is moving water, so **current** and **waves** drive the rating. **Wind** and **water temperature** can raise it. **Tide** is shown but not scored. An hour takes its worst factor’s level, and moderate current plus moderate waves together count as high. With no current or wave data, the hour gets no rating instead of a misleading one.
+What knocks a chest-deep wader off their feet is moving water, so **current** and **waves** drive the rating. **Wind** and **water temperature** can raise it, and an SFPUC posting makes it High no matter what. **Tide** is shown but not scored. An hour takes its worst factor’s level, and moderate current plus moderate waves together count as high. With no current or wave data, the hour gets no rating instead of a misleading one.
 
 | Factor | Source | How it’s turned into a level |
 |---|---|---|
 | Current | NOAA predictions, Fort Point 0.5 nmi E (PCT0286) | Interpolated between slack and max, peak within the hour, scaled to the beach, then depth × speed against the 0.6 m²/s adult stability limit |
 | Waves | Open-Meteo marine forecast, offshore of the Gate | Each swell scaled by how well its period and direction get through the Gate |
 | Wind | NOAA measured (past hours), NWS forecast (later hours) | Sustained speed |
-| Water temperature | NOAA, San Francisco (9414290) | Under 50°F is a caution |
+| Water quality | SFPUC beach monitoring, Crissy Field Beach East (4612) | Posted for bacteria or a sewer overflow makes every hour High |
+| Water temperature | NOAA, San Francisco (9414290); SF Bar buoy (46237) through the server function while that station is down | Under 50°F is a caution |
 | Tide | NOAA, San Francisco (9414290) | Shown only |
 
 The NWS alerts for the point appear above the hours for comparison. They don’t feed the rating.

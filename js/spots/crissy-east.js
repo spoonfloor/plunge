@@ -54,7 +54,6 @@ export default {
     waterTempF: { caution: 50 },
   },
 
-  links: {
-    waterQuality: "https://sfpuc.org/programs/ocean-and-beach-monitoring",
-  },
+  // SFPUC shoreline bacteria monitoring. Sampled weekly.
+  waterQuality: { station: "4612", stationName: "Crissy Field Beach East" },
 };

@@ -107,6 +107,19 @@ export function assessWaterTemp(temp, spot) {
   };
 }
 
+// quality: { status: "clean" | "posted" | "unsampled", sampled: "2026-11-09" | null }
+export function assessWaterQuality(quality) {
+  if (!quality) return unknown("SFPUC water quality didn’t load.");
+  const when = quality.sampled ? `Last sampled ${shortDate(quality.sampled)}` : "No recent sample";
+  if (quality.status === "posted") {
+    return { level: "high", value: "Posted",
+      why: `SFPUC has posted this beach: bacteria were high in the last 24 hours, or sewage recently overflowed here. Don’t go in. ${when}.` };
+  }
+  if (quality.status === "unsampled") return unknown(`SFPUC isn’t sampling this beach right now. ${when}.`);
+  return { level: "low", value: "Meets standards",
+    why: `${when}. Bacteria meet California standards for water contact. SFPUC samples weekly.` };
+}
+
 export function assessTide(ft, nextFt) {
   if (ft == null) return unknown("No tide prediction for this hour.", "info");
   const trend = nextFt == null ? "" : nextFt > ft + 0.05 ? ", rising" : nextFt < ft - 0.05 ? ", falling" : ", turning";
@@ -127,21 +140,26 @@ export function assessHour(hour, startMs, data, spot) {
     // Measured where the hour has passed, forecast otherwise.
     wind: assessWind(data.windObserved?.[hour] ?? data.wind?.[hour], spot),
     waterTemp: assessWaterTemp(data.waterTemp, spot),
+    waterQuality: assessWaterQuality(data.waterQuality),
     tide: data.tide ? assessTide(data.tide[hour], data.tide[hour + 1]) : unknown("Tide predictions didn’t load.", "info"),
   };
   return { hour, startMs, factors, overall: overall(factors) };
 }
 
-const NAMES = { current: "current", waves: "waves", wind: "wind", waterTemp: "water temperature" };
+const NAMES = { current: "current", waves: "waves", wind: "wind", waterTemp: "water temperature", waterQuality: "water quality" };
 // Without these two there’s no honest rating: they’re what knocks a wader off their feet.
 const CRITICAL = ["current", "waves"];
 
 export function overall(factors) {
+  // A posted beach is a no-go whatever the water is doing.
+  if (factors.waterQuality?.level === "high") {
+    return { level: "high", drivers: ["waterQuality"], why: "SFPUC has posted this beach for bacteria or a sewer overflow. Don’t go in." };
+  }
   const missing = CRITICAL.filter(k => factors[k].level === "unknown");
   if (missing.length) {
     return { level: "unknown", drivers: missing, why: `No rating: ${missing.map(k => NAMES[k]).join(" and ")} data is missing.` };
   }
-  const scored = Object.keys(NAMES).filter(k => factors[k].level in RANK);
+  const scored = Object.keys(NAMES).filter(k => factors[k]?.level in RANK);
   if (factors.current.level === "caution" && factors.waves.level === "caution") {
     return { level: "high", drivers: ["current", "waves"],
       why: "Current and wave surge are both moderate. Together they push harder than either alone." };
@@ -188,6 +206,12 @@ export function hourSpan(from, to) {
 }
 
 // ---- Helpers -----------------------------------------------------------------------
+
+// "2026-11-09" → "Nov 9"
+function shortDate(date) {
+  const [y, m, d] = date.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" }).format(Date.UTC(y, m - 1, d));
+}
 
 function unknown(why, level = "unknown") { return { level, value: "Unavailable", why }; }
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));

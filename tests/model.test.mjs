@@ -1,7 +1,7 @@
 // node --test tests/
 import test from "node:test";
 import assert from "node:assert/strict";
-import { currentAt, peakCurrent, transferFactor, assessCurrent, assessWaves, overall, summarizeDay, hourSpan } from "../js/model.js";
+import { currentAt, peakCurrent, transferFactor, assessCurrent, assessWaves, overall, summarizeDay, hourSpan, assessWaterQuality } from "../js/model.js";
 import spot from "../js/spots/crissy-east.js";
 import { zonedToMs, zonedParts } from "../js/time.js";
 
@@ -66,4 +66,16 @@ test("day summary groups hours by rating", () => {
     "Low 6–8 AM. High 8–10 AM, because of the wind and waves. Caution 10–11 AM, because of the current. Low 11 AM–12 PM.");
   assert.equal(hourSpan(11, 13), "11 AM–1 PM");
   assert.equal(hourSpan(13, 18), "1–6 PM");
+});
+
+test("a posted beach is High every hour, even without current or wave data", () => {
+  const posted = assessWaterQuality({ status: "posted", sampled: "2026-11-09" });
+  assert.equal(posted.level, "high");
+  const f = { current: { level: "unknown" }, waves: { level: "low" }, wind: { level: "low" },
+    waterTemp: { level: "low" }, waterQuality: posted, tide: { level: "info" } };
+  assert.deepEqual(overall(f), { level: "high", drivers: ["waterQuality"], why: "SFPUC has posted this beach for bacteria or a sewer overflow. Don’t go in." });
+  assert.equal(assessWaterQuality({ status: "clean", sampled: "2026-11-09" }).level, "low");
+  assert.match(assessWaterQuality({ status: "clean", sampled: "2026-11-09" }).why, /Nov 9/);
+  assert.equal(assessWaterQuality({ status: "unsampled", sampled: null }).level, "unknown");
+  assert.equal(assessWaterQuality(null).level, "unknown");
 });
