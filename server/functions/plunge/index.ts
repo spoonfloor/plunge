@@ -40,7 +40,9 @@ Deno.serve(async req => {
   }
   try {
     if (!cached || Date.now() - cached.at > CACHE_MS) cached = { at: Date.now(), body: await waterTemp() };
-    return Response.json(cached.body, { headers: { "Cache-Control": "public, max-age=600" } });
+    // The gateway’s CORS header echoes the requesting site, so caches must keep one
+    // copy per site (Vary: Origin) or a copy fetched from one site breaks another.
+    return Response.json(cached.body, { headers: { "Cache-Control": "public, max-age=600", "Vary": "Origin" } });
   } catch (err) {
     return Response.json({ error: (err as Error).message }, { status: 502 });
   }
