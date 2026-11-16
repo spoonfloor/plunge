@@ -146,13 +146,15 @@ const dayIndex = date => state.dates.indexOf(date);
 const utcDate = date => { const [y, m, d] = date.split("-").map(Number); return Date.UTC(y, m - 1, d); };
 const weekday = (date, style) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: style }).format(utcDate(date));
 const longDate = date => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "long", day: "numeric" }).format(utcDate(date));
-// “Today”, “Yesterday”, “Tomorrow”, “Thu 19”.
-function dayWord(date) {
+// The day and hour on the Risk line, always with the weekday: “Now, Mon 10 AM”,
+// “Today, Mon 12 PM”, “Yesterday, Sun 15, 1 PM”, “Tomorrow, Tue 17, 1 PM”, “Thu 19, 1 PM”.
+function whenLabel(date, hour) {
+  const wd = weekday(date, "short"), wdDate = `${wd} ${Number(date.slice(8))}`;
   const n = dayIndex(date) - dayIndex(state.today);
-  return n === 0 ? "Today" : n === -1 ? "Yesterday" : n === 1 ? "Tomorrow" : `${weekday(date, "short")} ${Number(date.slice(8))}`;
+  if (n === 0) return `${isNow(date, hour) ? "Now" : "Today"}, ${wd} ${hourLabel(hour)}`;
+  const word = n === -1 ? "Yesterday, " : n === 1 ? "Tomorrow, " : "";
+  return `${word}${wdDate}, ${hourLabel(hour)}`;
 }
-// “Now, 2 PM”, “Today, 3 PM”, “Thu 19, 2 PM”.
-const whenLabel = (date, hour) => `${isNow(date, hour) ? "Now" : dayWord(date)}, ${hourLabel(hour)}`;
 
 // ---- Rendering -------------------------------------------------------------------------
 
