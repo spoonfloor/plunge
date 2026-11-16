@@ -50,17 +50,35 @@ a { color: var(--accent-color); }
 #hero { padding: 20px 0 16px; }
 .level-word { margin: 2px 0 4px; font-size: 56px; line-height: 1.05; font-weight: 700;
   letter-spacing: -0.02em; color: var(--chip-color, var(--text-color)); }
-#hero-why { margin: 0; font-size: 17px; line-height: 1.4; }
+#hero-sky { display: flex; align-items: center; gap: 8px; min-height: 24px; margin: 0;
+  font-size: 17px; line-height: 1.4; color: var(--text-muted); }
+#hero-sky .sky-icon { width: 22px; height: 22px; }
+
+/* Sky icons: outline, in the text color. Clouds are filled with the surface behind them
+   so a sun or moon behind a cloud is hidden. */
+.sky-icon { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.sky-icon .cloud { fill: var(--page-color); }
+
+/* One sky icon above each hour of the strip. */
+#sky-row { display: grid; grid-template-columns: repeat(var(--hours, 12), 1fr); gap: 3px; margin-bottom: 6px;
+  color: var(--text-muted); }
+#sky-row span { display: flex; justify-content: center; height: 22px; }
+#sky-row .sky-icon { width: 20px; height: 20px; }
+#sky-row .past { opacity: 0.4; }
 
 /* One column per hour, colored by rating. Tap to select. */
-#strip { display: grid; grid-template-columns: repeat(var(--hours, 12), 1fr); gap: 3px; margin-bottom: 20px; }
+/* touch-action: horizontal drags scrub the hours (app.js); vertical ones scroll. */
+#strip { display: grid; grid-template-columns: repeat(var(--hours, 12), 1fr); gap: 3px; margin-bottom: 20px;
+  touch-action: pan-y; }
 #strip button { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0;
   border: 0; background: none; color: var(--text-muted); font: inherit; cursor: pointer; min-height: 64px; }
 #strip .bar { width: 100%; height: 40px; border-radius: 6px; background: var(--chip-bar);
   box-sizing: border-box; }
 #strip .past .bar { opacity: 0.4; }
 #strip .label { font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1; }
-#strip .now .label { color: var(--accent-color); font-weight: 700; }
+#strip .now .label { color: var(--text-color); text-decoration: underline 2px; text-underline-offset: 3px; }
+/* Raised so later hours never paint over the selection ring. */
+#strip [aria-pressed="true"] { position: relative; z-index: 1; }
 #strip [aria-pressed="true"] .bar { box-shadow: 0 0 0 2px var(--page-color), 0 0 0 4px var(--text-color); }
 #strip [aria-pressed="true"] .label { color: var(--text-color); font-weight: 700; }
 #strip button:focus-visible { outline: none; }
@@ -73,7 +91,31 @@ a { color: var(--accent-color); }
 .factor { background: var(--surface-color); border-radius: var(--radius); padding: 14px 16px; }
 .factor .name { display: flex; justify-content: space-between; gap: 8px; margin: 0;
   font-size: 15px; font-weight: 600; color: var(--text-muted); }
-.factor .rating { color: var(--chip-color); }
+.factor .rating { display: flex; align-items: center; gap: 10px; color: var(--chip-color); }
+/* The non-expanding cards (single readings) sit a little apart from the hourly ones. */
+#factors .group-start { margin-top: 8px; }
+
+/* Cards that open to show the day’s curve: the whole card is the button. */
+.expandable { position: relative; }
+.expandable .expand { position: absolute; inset: 0; z-index: 1; width: 100%; border: 0; padding: 0;
+  background: none; border-radius: var(--radius); cursor: pointer; }
+.expandable .expand:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
+.chevron, #advisories summary::after { flex: none; width: 8px; height: 8px; margin: 0 4px 4px 0;
+  border: solid var(--text-muted); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.expand[aria-expanded="true"] ~ .name .chevron, #advisories details[open] summary::after {
+  margin: 4px 4px 0 0; transform: rotate(-135deg); }
+
+/* The day’s curve inside an open card. */
+.curve { display: block; width: 100%; height: auto; margin: 8px 0 6px; overflow: visible; }
+.curve .trace { fill: none; stroke: var(--text-muted); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.curve .threshold { stroke-width: 1.5; stroke-dasharray: 4 4; }
+.curve .threshold.caution { stroke: var(--caution-bar); }
+.curve .threshold.high { stroke: var(--high-bar); }
+.curve .threshold-label { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.curve .threshold-label.caution { fill: var(--caution-bar); }
+.curve .threshold-label.high { fill: var(--high-bar); }
+.curve .dot { fill: var(--chip-bar); stroke: var(--surface-color); stroke-width: 2; }
+.curve .axis { font-size: 11px; fill: var(--text-muted); }
 .factor .value { margin: 2px 0 0; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em; }
 .factor .value + .note { margin-top: 6px; }
@@ -83,10 +125,8 @@ a { color: var(--accent-color); }
 #advisories summary { display: flex; justify-content: space-between; align-items: center; gap: 12px;
   margin-top: 2px; font-size: 20px; font-weight: 600; line-height: 1.3; cursor: pointer; list-style: none; }
 #advisories summary::-webkit-details-marker { display: none; }
-/* Chevron: down when closed, up when open. */
-#advisories summary::after { content: ""; flex: none; width: 8px; height: 8px; margin: 0 4px 4px 0;
-  border: solid var(--text-muted); border-width: 0 2px 2px 0; transform: rotate(45deg); }
-#advisories details[open] summary::after { margin: 4px 4px 0 0; transform: rotate(-135deg); }
+/* Chevron (shared with the expandable cards above): down when closed, up when open. */
+#advisories summary::after { content: ""; }
 .advisory { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-color); }
 .advisory .note + .note { margin-top: 8px; }
 .advisory-name { margin: 0; font-size: 17px; font-weight: 600; }

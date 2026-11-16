@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { currentAt, peakCurrent, transferFactor, assessCurrent, assessWaves, assessWind, windPush, overall, summarizeDay, hourSpan,
-  assessWaterQuality, waterAdvisories, advisorySummary, advisoryParagraphs } from "../js/model.js";
+  assessWaterQuality, waterAdvisories, advisorySummary, advisoryParagraphs, currentKnots, thresholds, skyKind, skyLine } from "../js/model.js";
 import spot from "../js/spots/crissy-east.js";
 import { zonedToMs, zonedParts } from "../js/time.js";
 
@@ -105,7 +105,7 @@ test("wind says which way it pushes a wader on a north-facing beach", () => {
   assert.equal(windPush("W", 0), "Along the shore, pushing you east");
   assert.equal(windPush("E", 0), "Along the shore, pushing you west");
   assert.equal(windPush("", 0), null);
-  assert.deepEqual(assessWind({ mph: 12, dir: "W" }, spot), { level: "low", value: "12 mph", notes: ["Along the shore, pushing you east"] });
+  assert.deepEqual(assessWind({ mph: 12, dir: "W" }, spot), { level: "low", amount: 12, value: "12 mph", notes: ["Along the shore, pushing you east"] });
 });
 
 test("advisories keep only water-relevant NWS events", () => {
@@ -116,4 +116,30 @@ test("advisories keep only water-relevant NWS events", () => {
   assert.deepEqual(waterAdvisories(null), []);
   assert.deepEqual(advisoryParagraphs("* WHAT...Breaking waves of 18 to\n24 ft.\n\n* WHERE...Coast of\nSan Francisco."),
     ["What: Breaking waves of 18 to 24 ft.", "Where: Coast of San Francisco."]);
+});
+
+test("current thresholds in knots, and ratings use the number the card shows", () => {
+  assert.deepEqual(currentKnots(spot), { caution: 0.6, high: 0.9 });
+  assert.deepEqual(thresholds(spot).waves, { caution: 2, high: 3 });
+  // 1.16 kn in the channel → 0.58 kn at the beach, shown as 0.6 → caution, not low.
+  const ev = [{ ms: 0, knots: 1.16 }, { ms: H, knots: 1.16 }, { ms: 2 * H, knots: 0 }];
+  const c = assessCurrent(ev, 0, spot);
+  assert.equal(c.value, "0.6 kn");
+  assert.equal(c.level, "caution");
+  assert.equal(c.amount, 0.6);
+  // 1.96 ft shows as 2.0 ft, so it’s rated at the 2 ft line.
+  assert.equal(assessWaves({ beachFt: 1.96 }, spot).level, "caution");
+});
+
+test("sky icon and line from the NWS short forecast", () => {
+  assert.equal(skyKind({ text: "Sunny", day: true }), "sun");
+  assert.equal(skyKind({ text: "Clear", day: false }), "moon");
+  assert.equal(skyKind({ text: "Partly Cloudy", day: true }), "partly-day");
+  assert.equal(skyKind({ text: "Mostly Clear", day: false }), "partly-night");
+  assert.equal(skyKind({ text: "Mostly Cloudy", day: true }), "cloud");
+  assert.equal(skyKind({ text: "Chance Light Rain", day: true }), "rain");
+  assert.equal(skyKind({ text: "Chance Showers And Thunderstorms", day: true }), "storm");
+  assert.equal(skyKind({ text: "Patchy Fog", day: true }), "fog");
+  assert.equal(skyLine({ text: "Partly Sunny", rainPct: 20 }), "Partly sunny · 20% rain");
+  assert.equal(skyLine({ text: "Chance Light Rain", rainPct: 28 }), "Chance light rain · 28%");
 });

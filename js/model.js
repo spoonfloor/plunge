@@ -40,16 +40,29 @@ export function nextSlack(events, ms) {
   return events.find(e => e.ms >= ms && e.knots === 0)?.ms ?? null;
 }
 
+// Current thresholds as speed at the beach (knots, to the tenth shown on the card):
+// depth × speed at chest depth reaching the spot’s caution and high limits.
+export function currentKnots(spot) {
+  const kn = dv => round1(dv / (spot.standingDepthM * KNOT_MS));
+  return { caution: kn(spot.thresholds.currentDV.caution), high: kn(spot.thresholds.currentDV.high) };
+}
+
+// Each factor’s thresholds in the units its card shows, for the day curves.
+export function thresholds(spot) {
+  return { current: currentKnots(spot), waves: spot.thresholds.beachWaveFt, wind: spot.thresholds.windMph };
+}
+
+// Ratings compare the number as the card shows it, so “0.6 kn” is never rated below a
+// 0.6 kn line because it was really 0.58.
+const levelFor = (x, { caution, high }) => x >= high ? "high" : x >= caution ? "caution" : "low";
+
 // The tide’s height (feet above MLLW) rides along here: the current is what it does
 // to a wader, so the two share a card.
 export function assessCurrent(events, startMs, spot, tideFt = null) {
   const channel = peakCurrent(events, startMs);
   if (channel === null) return unknown("No current prediction covers this hour.");
-  const beach = Math.abs(channel) * spot.current.nearshoreFactor;
-  // Depth × speed at chest depth, against the depth where adults lose their footing.
-  const dv = spot.standingDepthM * beach * KNOT_MS;
-  const { caution, high } = spot.thresholds.currentDV;
-  const level = dv >= high ? "high" : dv >= caution ? "caution" : "low";
+  const beach = round1(Math.abs(channel) * spot.current.nearshoreFactor);
+  const level = levelFor(beach, currentKnots(spot));
   const way = Math.abs(channel) < 0.05 ? "Near slack"
     : channel < 0 ? "Ebb, pulling west toward the Gate" : "Flood, pushing east toward the Marina";
   const slack = nextSlack(events, startMs);
@@ -57,6 +70,7 @@ export function assessCurrent(events, startMs, spot, tideFt = null) {
     ? " tomorrow" : "";
   return {
     level,
+    amount: beach,
     value: `${fmt(beach)} kn`,
     notes: [
       way,
@@ -93,11 +107,10 @@ export function beachWaveFt(swells, spot) {
 // waves: one hour, either { beachFt } from the NWS nearshore model or { swells } from
 // the offshore forecast.
 export function assessWaves(waves, spot) {
-  const beach = waves?.beachFt ?? beachWaveFt(waves?.swells, spot);
-  if (beach == null) return unknown("No wave forecast for this hour.");
-  const { caution, high } = spot.thresholds.beachWaveFt;
-  const level = beach >= high ? "high" : beach >= caution ? "caution" : "low";
-  return { level, value: `${fmt(beach)} ft`, notes: [] };
+  const raw = waves?.beachFt ?? beachWaveFt(waves?.swells, spot);
+  if (raw == null) return unknown("No wave forecast for this hour.");
+  const beach = round1(raw);
+  return { level: levelFor(beach, spot.thresholds.beachWaveFt), amount: beach, value: `${fmt(beach)} ft`, notes: [] };
 }
 
 // ---- Wind and water temperature ----------------------------------------------------
@@ -117,9 +130,8 @@ export function windPush(fromDir, shoreFacingDeg) {
 
 export function assessWind(wind, spot) {
   if (!wind) return unknown("No wind measurement or forecast for this hour.");
-  const { caution, high } = spot.thresholds.windMph;
-  const level = wind.mph >= high ? "high" : wind.mph >= caution ? "caution" : "low";
-  return { level, value: `${wind.mph} mph`, notes: [windPush(wind.dir, spot.shoreFacingDeg)].filter(Boolean) };
+  return { level: levelFor(wind.mph, spot.thresholds.windMph), amount: wind.mph, value: `${wind.mph} mph`,
+    notes: [windPush(wind.dir, spot.shoreFacingDeg)].filter(Boolean) };
 }
 
 export function assessWaterTemp(temp, spot) {
@@ -137,6 +149,27 @@ export function assessWaterQuality(quality) {
   }
   if (quality.status === "unsampled") return unknown(`SFPUC isn’t sampling this beach right now. ${when}.`);
   return { level: "low", value: "Meets standards", notes: [when] };
+}
+
+// ---- Sky ---------------------------------------------------------------------------
+
+// sky: { text: "Partly Sunny", rainPct: 20, day: true } from the NWS hourly forecast →
+// which icon to draw. Order matters: “Chance Showers And Thunderstorms” is a storm,
+// “Partly Cloudy” is partly, not cloudy.
+export function skyKind(sky) {
+  const t = sky.text.toLowerCase();
+  if (/thunder|t-storm/.test(t)) return "storm";
+  if (/rain|shower|drizzle|sleet|snow/.test(t)) return "rain";
+  if (/fog|haze|smoke|mist/.test(t)) return "fog";
+  if (/partly|mostly sunny|mostly clear/.test(t)) return sky.day ? "partly-day" : "partly-night";
+  if (/cloud|overcast/.test(t)) return "cloud";
+  return sky.day ? "sun" : "moon";
+}
+
+// “Partly sunny · 20% rain”, or “Chance light rain · 28%” when the words already say rain.
+export function skyLine(sky) {
+  const text = `${sky.text.charAt(0)}${sky.text.slice(1).toLowerCase()}`;
+  return `${text} · ${Math.round(sky.rainPct)}%${/rain|shower|drizzle/.test(text) ? "" : " rain"}`;
 }
 
 // ---- NWS advisories ----------------------------------------------------------------
@@ -267,6 +300,7 @@ function shortDate(date) {
 function unknown(note) { return { level: "unknown", value: "Unavailable", notes: [note] }; }
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 const fmt = (x, digits = 1) => x.toFixed(digits);
+const round1 = x => Math.round(x * 10) / 10;
 const list = xs => xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`;
 
 const COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];

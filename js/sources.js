@@ -113,15 +113,29 @@ const FETCHERS = {
     }
   },
 
-  async wind(spot, date) {
-    const point = await getJson(`https://api.weather.gov/points/${spot.lat},${spot.lon}`);
-    const json = await getJson(point.properties.forecastHourly);
+  async wind(spot, date, shared) {
+    const json = await shared.nwsHourly();
     const data = {};
     for (const p of json.properties.periods) {
       const at = zonedParts(Date.parse(p.startTime), spot.timeZone);
       if (at.date !== date) continue;
       const mph = Math.max(...(p.windSpeed.match(/\d+/g) ?? []).map(Number));
       if (Number.isFinite(mph)) data[at.hour] = { mph, dir: p.windDirection };
+    }
+    return { data, label: "National Weather Service hourly forecast",
+      link: `https://forecast.weather.gov/MapClick.php?lat=${spot.lat}&lon=${spot.lon}` };
+  },
+
+  // Sky and chance of rain by hour, from the same NWS forecast as wind. The forecast
+  // starts at the current hour, so hours already past keep what an earlier load of
+  // today saved.
+  async sky(spot, date, shared) {
+    const json = await shared.nwsHourly();
+    const data = { ...readCache(spot, "sky", date)?.data };
+    for (const p of json.properties.periods) {
+      const at = zonedParts(Date.parse(p.startTime), spot.timeZone);
+      if (at.date !== date) continue;
+      data[at.hour] = { text: p.shortForecast, rainPct: p.probabilityOfPrecipitation?.value ?? 0, day: p.isDaytime };
     }
     return { data, label: "National Weather Service hourly forecast",
       link: `https://forecast.weather.gov/MapClick.php?lat=${spot.lat}&lon=${spot.lon}` };
@@ -186,8 +200,9 @@ const FETCHERS = {
 // Names for sources that failed before ever loading.
 const NAMES = {
   currents: "NOAA current predictions", tide: "NOAA tide predictions",
-  waterTemp: "NOAA water temperature", waves: "Open-Meteo marine forecast",
-  wind: "National Weather Service hourly forecast", windObserved: "NOAA measured wind",
+  waterTemp: "NOAA water temperature", waves: "NWS nearshore wave forecast",
+  wind: "National Weather Service hourly forecast", sky: "National Weather Service hourly forecast",
+  windObserved: "NOAA measured wind",
   waterQuality: "SFPUC beach water quality", alerts: "National Weather Service active alerts",
 };
 
@@ -205,9 +220,15 @@ function writeCache(spot, key, entry) {
 // Resolves to { data: { currents, tide, ... }, sources: [{ key, label, link, fetchedAt, stale, error }] }.
 export async function loadAll(spot, date) {
   const keys = Object.keys(FETCHERS);
+  // Requests more than one fetcher reads, made once per load.
+  let hourly;
+  const shared = {
+    nwsHourly: () => hourly ??= getJson(`https://api.weather.gov/points/${spot.lat},${spot.lon}`)
+      .then(point => getJson(point.properties.forecastHourly)),
+  };
   const results = await Promise.all(keys.map(async key => {
     try {
-      const got = await FETCHERS[key](spot, date);
+      const got = await FETCHERS[key](spot, date, shared);
       const entry = { date, ...got, fetchedAt: Date.now() };
       writeCache(spot, key, entry);
       return { key, ...entry, stale: false };

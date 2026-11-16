@@ -6,7 +6,7 @@ Live at https://spoonfloor.github.io/plunge/. Install it from Safari with Share 
 
 ## How the rating works
 
-What knocks a chest-deep wader off their feet is moving water, so **current** and **waves** drive the rating. **Wind** and **water temperature** can raise it, and an SFPUC posting makes it High no matter what. **Tide** height is shown on the current card, with the next slack, but not scored. An hour takes its worst factor’s level, and moderate current plus moderate waves together count as high. With no current or wave data, the hour gets no rating instead of a misleading one.
+What knocks a chest-deep wader off their feet is moving water, so **current** and **waves** drive the rating. **Wind** and **water temperature** can raise it, and an SFPUC posting makes it High no matter what. **Tide** height is shown on the current card, with the next slack, but not scored. Each factor is rated on the number its card shows (0.58 kn shows as 0.6 and is rated at the 0.6 line). An hour takes its worst factor’s level, and moderate current plus moderate waves together count as high. With no current or wave data, the hour gets no rating instead of a misleading one.
 
 | Factor | Source | How it’s turned into a level |
 |---|---|---|
@@ -17,7 +17,7 @@ What knocks a chest-deep wader off their feet is moving water, so **current** an
 | Water temperature | NOAA, San Francisco (9414290); SF Bar buoy (46237) through the server function while that station is down | Under 50°F is a caution |
 | Tide | NOAA, San Francisco (9414290) | Shown only, on the current card |
 
-NWS advisories for the point that bear on being in the water (surf, coastal flooding, wind, marine warnings) appear below the factors, with “None” when there are none. They don’t feed the rating.
+The sky icons above the hours and the sky line under the rating come from the NWS hourly forecast; they don’t feed the rating either. NWS advisories for the point that bear on being in the water (surf, coastal flooding, wind, marine warnings) appear below the factors, with “None” when there are none. They don’t feed the rating.
 
 The beach scaling for current, and for waves when the nearshore model is unavailable, is a starting guess (`js/spots/crissy-east.js`), not yet tuned against real sessions.
 
