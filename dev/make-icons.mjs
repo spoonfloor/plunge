@@ -13,7 +13,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = path.join(ROOT, JSON.parse(fs.readFileSync(path.join(ROOT, "app.config.json"), "utf8")).icon);
 // The browser-tab favicon gets slightly rounded corners. Home Screen and
 // manifest icons stay square: iOS and Android apply their own rounding.
-const FAVICON_RADIUS = 80; // of 512
+const FAVICON_RADIUS = 80 / 512; // of the icon’s width
 const ICONS = [
   [180, "apple-touch-icon.png", false], // iOS Home Screen
   [32, "favicon-32.png", true],         // browsers without SVG favicons
@@ -26,7 +26,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 if (!fs.existsSync(CHROME)) throw new Error(`Google Chrome is needed to render icons; not found at ${CHROME}`);
 const square = fs.readFileSync(SRC, "utf8").replace(/^<\?xml[^>]*>\s*/, "");
-const rounded = square.replace(/<rect id="bg"/, `<rect id="bg" rx="${FAVICON_RADIUS}"`);
+const width = Number(square.match(/viewBox="[\d.-]+[\s,]+[\d.-]+[\s,]+([\d.]+)/)?.[1]);
+if (!width) throw new Error(`${path.relative(ROOT, SRC)} needs a viewBox`);
+const rounded = square.replace(/<rect id="bg"/, `<rect id="bg" rx="${+(FAVICON_RADIUS * width).toFixed(2)}"`);
 if (rounded === square) throw new Error(`${path.relative(ROOT, SRC)} has no <rect id="bg"> to round`);
 fs.writeFileSync(path.join(ROOT, "icons/favicon.svg"), rounded);
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), "icons-"));

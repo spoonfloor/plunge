@@ -1,7 +1,7 @@
 /* Between these markers is written by dev/configure.mjs from app.config.json. Edit there. */
 /* config */
 :root {
-  --config-accent: #3b6cff;
+  --config-accent: #00bfff;
   --config-page-light: #f5f5f5;
   --config-page-dark: #111111;
 }
@@ -15,7 +15,10 @@
   --surface-color: color-mix(in srgb, var(--page-color), black 6%); /* cards, sheets */
   --text-color: #171717;
   --text-muted: #525252;
-  --accent-color: var(--config-accent);
+  /* Links and focus rings on the page. The accent itself (the icon’s sky blue) is too
+     light to read on the light page (1.95:1), so light mode darkens it to 5.6:1; dark
+     mode uses it as is. Retune the 35% if the accent changes. */
+  --accent-color: color-mix(in oklch, var(--config-accent), black 35%);
   --accent-text-color: white;
 
   --line-color: color-mix(in srgb, var(--text-color), transparent 88%);
@@ -40,6 +43,7 @@
     --surface-color: color-mix(in srgb, var(--page-color), white 10%);
     --text-color: #eeeeee;
     --text-muted: #a3a3a3;
+    --accent-color: var(--config-accent);
     --low-color: #6fd38c;      --low-soft: #173a22;
     --caution-color: #f2c35b;  --caution-soft: #3d2f0e;
     --high-color: #ff8a80;     --high-soft: #45191a;
