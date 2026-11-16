@@ -1,6 +1,6 @@
 # Plunge
 
-How risky is it to wade chest deep at Crissy Field East Beach today? An hour-by-hour rating from 6 AM to 5 PM, with each factor and the reason behind it. Built because NWS warnings cover whole stretches of coast, not this beach.
+How risky is it to wade chest deep at Crissy Field East Beach today? An hour-by-hour rating from 6 AM to 5 PM, with each factor and the reason behind it, for yesterday through five days ahead. Swipe the page sideways (or tap the dots under the title, or press ← →) to change the day; the hour you picked stays picked. Built because NWS warnings cover whole stretches of coast, not this beach.
 
 Live at https://spoonfloor.github.io/plunge/. Install it from Safari with Share → Add to Home Screen.
 
@@ -11,13 +11,13 @@ What knocks a chest-deep wader off their feet is moving water, so **current** an
 | Factor | Source | How it’s turned into a level |
 |---|---|---|
 | Current | NOAA predictions, Fort Point 0.5 nmi E (PCT0286) | Interpolated between slack and max, peak within the hour, scaled to the beach, then depth × speed against the 0.6 m²/s adult stability limit |
-| Waves | NWS Nearshore Wave Prediction System (SWAN, ~1 km grid around the Bay), through the server function; Open-Meteo offshore forecast, scaled to the beach, when that’s unavailable | Height at the beach. Caution at 2 ft, where the crest reaches a chest-deep wader’s mouth; high at 3 ft, about where waves break at chest depth |
+| Waves | NWS Nearshore Wave Prediction System (SWAN, ~1 km grid around the Bay), through the server function; Open-Meteo offshore forecast, scaled to the beach, when that’s unavailable | Height at the beach. The nearshore run reaches about six days out; the offshore estimate fills hours it doesn’t cover, such as yesterday’s. Caution at 2 ft, where the crest reaches a chest-deep wader’s mouth; high at 3 ft, about where waves break at chest depth |
 | Wind | NOAA measured (past hours), NWS forecast (later hours) | Sustained speed. Direction is shown as onshore, offshore or along the shore, from the way the beach faces |
 | Water quality | SFPUC beach monitoring, Crissy Field Beach East (4612) | Posted for bacteria or a sewer overflow makes every hour High |
-| Water temperature | NOAA, San Francisco (9414290); SF Bar buoy (46237) through the server function while that station is down | Under 50°F is a caution |
+| Water temperature | NOAA, San Francisco (9414290); SF Bar buoy (46237) through the server function while that station is down | Under 50°F is a caution. A latest reading, not a forecast: other days show today’s, and say so |
 | Tide | NOAA, San Francisco (9414290) | Shown only, on the current card |
 
-After the time on the Risk line, icons for current, waves and wind (or the water temperature itself) show what’s driving a Caution or High hour. The sky icons above the hours and the sky line under the rating come from the NWS forecast: the hourly forecast’s own words where it has the hour, and its gridpoint data for hours already past. Rain icons show intensity (light, rain, heavy); the chance of rain is the % on the sky line. They don’t feed the rating either. NWS advisories for the point that bear on being in the water (surf, coastal flooding, wind, marine warnings) appear below the factors, with “None” when there are none. They don’t feed the rating.
+After the time on the Risk line, icons for current, waves and wind (or the water temperature itself) show what’s driving a Caution or High hour. The sky icons above the hours and the sky line under the rating come from the NWS forecast: the hourly forecast’s own words where it has the hour, and its gridpoint data for hours already past. Rain icons show intensity (light, rain, heavy); the chance of rain is the % on the sky line. Hours the forecast has already dropped, mostly yesterday’s, show the sky as reported at SFO (the nearest NWS station that reports it, about 17 km south), marked “at SFO”. They don’t feed the rating either. NWS advisories for the point that bear on being in the water (surf, coastal flooding, wind, marine warnings) appear below the factors, with “None” when there are none. They don’t feed the rating.
 
 The beach scaling for current, and for waves when the nearshore model is unavailable, is a starting guess (`js/spots/crissy-east.js`), not yet tuned against real sessions.
 
@@ -26,7 +26,7 @@ The beach scaling for current, and for waves when the nearshore model is unavail
 | File | What it’s for |
 |---|---|
 | `js/spots/crissy-east.js` | Everything specific to the beach: location, stations, scaling, thresholds. A new spot is a new file. |
-| `js/sources.js` | Fetches and normalizes each source. Each fails on its own, and falls back to today’s last good copy on this device. |
+| `js/sources.js` | Fetches and normalizes each source, for every day shown in one load. Each fails on its own, and falls back to today’s last good copy on this device. |
 | `js/model.js` | The risk model. Pure functions, tested in `tests/`. |
 | `js/app.js` | Renders the page |
 | `js/time.js` | Times in the beach’s time zone, whatever the phone’s zone |

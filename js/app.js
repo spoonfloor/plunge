@@ -2,9 +2,15 @@
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 
 import spot from "./spots/crissy-east.js";
-import { loadAll } from "./sources.js";
+import { forDate, loadAll } from "./sources.js";
 import { advisoryParagraphs, advisorySummary, assessHour, skyKind, skyLine, summarizeDay, thresholds, waterAdvisories } from "./model.js";
-import { hourLabel, zonedParts, zonedToMs } from "./time.js";
+import { addDays, hourLabel, zonedParts, zonedToMs } from "./time.js";
+
+// The days you can swipe between: yesterday, today and five ahead. Five is as far as
+// the NWS nearshore wave model reaches; past it a rating would lean on the rougher
+// offshore estimate alone. Yesterday is there to check the rating against how the
+// water felt.
+const DAYS_BACK = 1, DAYS_AHEAD = 5;
 
 const LABELS = { low: "Low", caution: "Caution", high: "High", unknown: "No rating" };
 // Factor cards in order. The first three change hour to hour and open to show the
@@ -79,29 +85,39 @@ function driverMarks(r) {
 
 const skyIcon = sky => svg("svg", { class: "sky-icon", viewBox: "0 0 24 24", "aria-hidden": "true" }, SKY_ICONS[skyKind(sky)]());
 
-const state = { date: null, hours: [], sky: {}, selected: null, open: new Set(), lastLoad: 0, loading: false };
+// date: the day shown. selected: the hour picked, or null for “now” (on other days,
+// the hour it is now). Both carry across days, so swiping compares the same hour.
+const state = { today: null, dates: [], days: {}, alerts: null, date: null, selected: null,
+  open: new Set(), advisoriesOpen: false, lastLoad: 0, loading: false };
 
 async function refresh() {
   if (state.loading) return;
   state.loading = true;
   $("refresh").disabled = true;
   if (state.lastLoad) $("updated").textContent = "Updating…"; // the first load keeps “Loading…”
-  const date = zonedParts(Date.now(), spot.timeZone).date;
+  const today = zonedParts(Date.now(), spot.timeZone).date;
+  const dates = Array.from({ length: DAYS_BACK + 1 + DAYS_AHEAD }, (_, i) => addDays(today, i - DAYS_BACK));
   try {
-    const { data, sources } = await loadAll(spot, date, (done, total) => {
+    const { data, sources } = await loadAll(spot, dates, (done, total) => {
       $("loader").max = total;
       $("loader").value = done;
     });
-    if (date !== state.date) state.selected = null; // a new day starts back at “now”
-    state.date = date;
-    state.sky = data.sky ?? {};
-    state.hours = [];
-    for (let hour = spot.firstHour; hour <= spot.lastHour; hour++) {
-      state.hours.push(assessHour(hour, zonedToMs(`${date} ${hour}:00`, spot.timeZone), data, spot));
-    }
+    if (today !== state.today) { state.date = today; state.selected = null; } // a new day starts back at “now”
+    state.today = today;
+    state.dates = dates;
+    state.alerts = data.alerts;
+    state.days = Object.fromEntries(dates.map(date => {
+      const day = forDate(data, date);
+      const hours = [];
+      for (let hour = spot.firstHour; hour <= spot.lastHour; hour++) {
+        hours.push(assessHour(hour, zonedToMs(`${date} ${hour}:00`, spot.timeZone), day, spot));
+      }
+      // The forecast’s sky where it has the hour; what a station reported where it doesn’t.
+      return [date, { hours, sky: { ...day.skyObserved, ...day.sky } }];
+    }));
     state.lastLoad = Date.now();
-    renderDay(data, sources);
-    renderHour();
+    renderStatus(sources);
+    render();
   } finally {
     document.querySelector("main").classList.remove("first-load");
     state.loading = false;
@@ -109,125 +125,174 @@ async function refresh() {
   }
 }
 
-// Where “now” falls in today’s window: the current hour, or the nearest end of it.
-function nowHour() {
-  const now = zonedParts(Date.now(), spot.timeZone);
-  if (now.date !== state.date) return null;
-  return Math.min(spot.lastHour, Math.max(spot.firstHour, now.hour));
-}
-function isPast(hour) {
-  const now = zonedParts(Date.now(), spot.timeZone);
-  return now.date === state.date && hour < now.hour;
-}
+// ---- Days and hours ------------------------------------------------------------------
 
-function renderDay(data, sources) {
+const clampHour = h => Math.min(spot.lastHour, Math.max(spot.firstHour, h));
+const now = () => zonedParts(Date.now(), spot.timeZone);
+const selectedHour = () => state.selected ?? clampHour(now().hour);
+// Where “now” falls in the day’s window: the current hour, or the nearest end of it.
+// Null on any other day.
+function nowHour(date) {
+  const n = now();
+  return n.date === date ? clampHour(n.hour) : null;
+}
+function isPast(date, hour) {
+  const n = now();
+  return n.date === date && hour < n.hour;
+}
+const isNow = (date, hour) => hour === nowHour(date) && !isPast(date, hour);
+
+const dayIndex = date => state.dates.indexOf(date);
+const utcDate = date => { const [y, m, d] = date.split("-").map(Number); return Date.UTC(y, m - 1, d); };
+const weekday = (date, style) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: style }).format(utcDate(date));
+const longDate = date => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "long", day: "numeric" }).format(utcDate(date));
+// “Today”, “Yesterday”, “Tomorrow”, “Thu 19”.
+function dayWord(date) {
+  const n = dayIndex(date) - dayIndex(state.today);
+  return n === 0 ? "Today" : n === -1 ? "Yesterday" : n === 1 ? "Tomorrow" : `${weekday(date, "short")} ${Number(date.slice(8))}`;
+}
+// “Now, 2 PM”, “Today, 3 PM”, “Thu 19, 2 PM”.
+const whenLabel = (date, hour) => `${isNow(date, hour) ? "Now" : dayWord(date)}, ${hourLabel(hour)}`;
+
+// ---- Rendering -------------------------------------------------------------------------
+
+function renderStatus(sources) {
   const stale = sources.filter(s => s.stale);
   $("updated").textContent = stale.length
     ? `Partly offline · ${clock(Math.min(...stale.map(s => s.fetchedAt)))}`
     : `Updated ${clock(Date.now())}`;
-
-  $("summary").textContent = summarizeDay(state.hours);
-
-  renderAdvisories(data.alerts);
 }
 
-// NWS advisories in force at some point in today’s window, water-relevant ones only.
-// A heads-up below the factors; they don’t change the rating.
-function renderAdvisories(alerts) {
-  const dayStart = zonedToMs(`${state.date} ${spot.firstHour}:00`, spot.timeZone);
-  const dayEnd = zonedToMs(`${state.date} ${spot.lastHour + 1}:00`, spot.timeZone);
-  const today = waterAdvisories(alerts).filter(a => a.onsetMs < dayEnd && (!a.endsMs || a.endsMs > dayStart));
-  const name = el("p", { class: "name" }, el("span", {}, "NWS advisories"),
-    today.length ? el("span", {}, `${today.length} active`) : null);
-  if (!alerts) {
-    $("advisories").replaceChildren(name, el("p", { class: "value" }, "Unavailable"),
-      el("p", { class: "note" }, "NWS advisories didn’t load."));
-  } else if (!today.length) {
-    $("advisories").replaceChildren(name, el("p", { class: "value" }, "None"));
-  } else {
-    $("advisories").replaceChildren(name, el("details", {},
-      el("summary", {}, advisorySummary(today)),
-      today.map(a => el("div", { class: "advisory" },
-        el("p", { class: "advisory-name" }, sentenceCase(a.event)),
-        a.endsMs ? el("p", { class: "advisory-when" }, `Until ${dayAndHour(a.endsMs)}`) : null,
-        advisoryParagraphs(a.description).map(p => el("p", { class: "note" }, p))))));
+// The shown day with the day before and after it beside it, ready to swipe in, and the
+// dots that say which day this is.
+function render() {
+  const i = dayIndex(state.date);
+  $("track").replaceChildren(dayPanel(state.dates[i - 1], -1), dayPanel(state.date, 0), dayPanel(state.dates[i + 1], 1));
+  $("days").replaceChildren(...state.dates.map(date => {
+    const button = el("button", { type: "button", class: date === state.today ? "today" : null,
+      "aria-current": date === state.date ? "true" : null,
+      "aria-label": `${date === state.today ? "Today, " : ""}${longDate(date)}` }, el("span", { class: "dot" }));
+    button.addEventListener("click", () => goTo(date));
+    return button;
+  }));
+  const r = state.days[state.date].hours.find(h => h.hour === selectedHour());
+  $("announce").textContent = `${whenLabel(state.date, r.hour)}: ${LABELS[r.overall.level]}`;
+}
+
+// One day: hero, sky icons, hour strip, summary, factor cards for the selected hour and
+// the day’s advisories. side: -1 and 1 are the neighbors, there only to swipe in, so
+// they’re hidden from screen readers and keyboard. Past either end, a note says why
+// there’s nothing more.
+function dayPanel(date, side) {
+  if (!date) {
+    return el("section", { class: `day end ${side < 0 ? "before" : "after"}`, inert: true, "aria-hidden": "true" },
+      el("p", {}, side < 0 ? "Nothing before yesterday" : "No forecast past here"));
   }
+  const { hours, sky } = state.days[date];
+  const selected = selectedHour();
+  const r = hours.find(h => h.hour === selected);
+  const marks = driverMarks(r);
+
+  const hero = el("section", { class: "hero", "data-level": r.overall.level },
+    el("p", { class: "hero-when eyebrow" },
+      el("span", { class: "when" }, `Risk · ${whenLabel(date, selected)}`),
+      marks.length ? el("span", { class: "drivers", role: "img",
+        "aria-label": `because of ${r.overall.drivers.map(k => FACTORS.find(f => f.key === k)?.name.toLowerCase()).join(" and ")}` }, marks) : null),
+    el("p", { class: "level-word" }, LABELS[r.overall.level]),
+    el("p", { class: "hero-sky" }, sky[selected] ? [skyIcon(sky[selected]), el("span", {}, skyLine(sky[selected]))] : []));
+
+  const skyRow = el("div", { class: "sky-row", "aria-hidden": "true", style: `--hours: ${hours.length}` },
+    hours.map(h => el("span", { class: isPast(date, h.hour) ? "past" : null }, sky[h.hour] ? skyIcon(sky[h.hour]) : null)));
+
+  const strip = el("div", { class: "strip", role: "group", "aria-label": "Pick an hour", style: `--hours: ${hours.length}` },
+    hours.map(h => {
+      const label = hourLabel(h.hour);
+      const button = el("button", {
+        type: "button", "data-level": h.overall.level, "aria-pressed": String(h.hour === selected),
+        "aria-label": [label, LABELS[h.overall.level], sky[h.hour]?.text].filter(Boolean).join(", "),
+        class: [isNow(date, h.hour) ? "now" : "", isPast(date, h.hour) ? "past" : ""].join(" ").trim() || null,
+      },
+        el("span", { class: "bar", "aria-hidden": "true" }),
+        el("span", { class: "label", "aria-hidden": "true" }, label.split(" ")[0]));
+      // Keyboard selection; pointer taps and drags go through the pager’s handlers.
+      button.addEventListener("click", e => { if (e.detail === 0) select(h.hour); });
+      return button;
+    }));
+
+  // Water temperature and quality are a latest reading, not a forecast: every day shows
+  // today’s, and says so.
+  const latestOnly = date !== state.today && {
+    waterTemp: "Today’s reading. There’s no forecast for water temperature.",
+    waterQuality: "Today’s posting. SFPUC doesn’t forecast water quality.",
+  };
+  const factors = el("ul", { class: "factors", "aria-label": "Factors for the selected hour" },
+    FACTORS.map(({ key, name, curve }, i) => {
+      const f = r.factors[key];
+      const rated = f.level in LABELS && f.level !== "unknown";
+      const open = curve && state.open.has(key);
+      const card = el("li", {
+        class: ["factor", curve ? "expandable" : "", i > 0 && !curve && FACTORS[i - 1].curve ? "group-start" : ""].join(" ").trim(),
+        "data-level": f.level,
+      },
+        curve ? el("button", { type: "button", class: "expand", "aria-expanded": String(open),
+          "aria-label": `${open ? "Hide" : "Show"} ${name.toLowerCase()} through the day` }) : null,
+        el("p", { class: "name" }, el("span", {}, name),
+          el("span", { class: "rating" }, rated ? LABELS[f.level] : null, curve ? el("span", { class: "chevron", "aria-hidden": "true" }) : null)),
+        el("p", { class: "value" }, f.value),
+        open ? dayCurve(key, selected, hours) : null,
+        f.notes.map(n => el("p", { class: "note" }, n)),
+        latestOnly?.[key] && rated ? el("p", { class: "note" }, latestOnly[key]) : null);
+      card.querySelector(".expand")?.addEventListener("click", () => {
+        state.open.has(key) ? state.open.delete(key) : state.open.add(key);
+        render();
+      });
+      return card;
+    }));
+
+  return el("section", { class: "day", "aria-label": longDate(date), inert: side !== 0, "aria-hidden": side !== 0 ? "true" : null },
+    hero, skyRow, strip,
+    el("p", { class: "summary card" }, summarizeDay(hours)),
+    factors,
+    advisories(date));
+}
+
+// NWS advisories in force at some point in the day’s window, water-relevant ones only.
+// A heads-up below the factors; they don’t change the rating.
+function advisories(date) {
+  const dayStart = zonedToMs(`${date} ${spot.firstHour}:00`, spot.timeZone);
+  const dayEnd = zonedToMs(`${date} ${spot.lastHour + 1}:00`, spot.timeZone);
+  const inForce = waterAdvisories(state.alerts).filter(a => a.onsetMs < dayEnd && (!a.endsMs || a.endsMs > dayStart));
+  const card = (...children) => el("section", { class: "advisories factor", "aria-label": "NWS advisories" },
+    el("p", { class: "name" }, el("span", {}, "NWS advisories"), inForce.length ? el("span", {}, `${inForce.length} active`) : null),
+    children);
+  if (!state.alerts) return card(el("p", { class: "value" }, "Unavailable"), el("p", { class: "note" }, "NWS advisories didn’t load."));
+  if (!inForce.length) return card(el("p", { class: "value" }, "None"));
+  const details = el("details", { open: state.advisoriesOpen },
+    el("summary", {}, advisorySummary(inForce)),
+    inForce.map(a => el("div", { class: "advisory" },
+      el("p", { class: "advisory-name" }, sentenceCase(a.event)),
+      a.endsMs ? el("p", { class: "advisory-when" }, `Until ${dayAndHour(a.endsMs)}`) : null,
+      advisoryParagraphs(a.description).map(p => el("p", { class: "note" }, p)))));
+  // Stays open or closed as you pick hours and days.
+  details.addEventListener("toggle", () => { state.advisoriesOpen = details.open; });
+  return card(details);
 }
 
 // “Coastal Flood Advisory” → “Coastal flood advisory”
 const sentenceCase = s => s.charAt(0) + s.slice(1).toLowerCase();
 
-// Hero, strip selection and factor cards for the selected hour.
-function renderHour() {
-  const current = nowHour();
-  const selected = state.selected ?? current ?? spot.firstHour;
-  const r = state.hours.find(h => h.hour === selected);
-  const isNow = h => h === current && !isPast(h);
-
-  $("hero").dataset.level = r.overall.level;
-  const marks = driverMarks(r);
-  $("hero-when").replaceChildren(
-    el("span", { class: "when" }, `Risk · ${isNow(selected) ? `Now, ${hourLabel(selected)}` : hourLabel(selected)}`),
-    marks.length ? el("span", { class: "drivers", role: "img",
-      "aria-label": `because of ${r.overall.drivers.map(k => FACTORS.find(f => f.key === k)?.name.toLowerCase()).join(" and ")}` }, marks) : null);
-  $("hero-level").textContent = LABELS[r.overall.level];
-  const sky = state.sky[selected];
-  $("hero-sky").replaceChildren(...(sky ? [skyIcon(sky), el("span", {}, skyLine(sky))] : []));
-
-  $("sky-row").replaceChildren(...state.hours.map(h => el("span", { class: isPast(h.hour) ? "past" : null },
-    state.sky[h.hour] ? skyIcon(state.sky[h.hour]) : null)));
-
-  $("strip").style.setProperty("--hours", state.hours.length);
-  $("sky-row").style.setProperty("--hours", state.hours.length);
-  $("strip").replaceChildren(...state.hours.map(h => {
-    const label = hourLabel(h.hour);
-    const button = el("button", {
-      type: "button", "data-level": h.overall.level, "aria-pressed": String(h.hour === selected),
-      "aria-label": [label, LABELS[h.overall.level], state.sky[h.hour]?.text].filter(Boolean).join(", "),
-      class: [isNow(h.hour) ? "now" : "", isPast(h.hour) ? "past" : ""].join(" ").trim() || null,
-    },
-      el("span", { class: "bar", "aria-hidden": "true" }),
-      el("span", { class: "label", "aria-hidden": "true" }, label.split(" ")[0]));
-    // Keyboard selection; pointer taps and drags go through the strip’s own handlers.
-    button.addEventListener("click", e => { if (e.detail === 0) select(h.hour); });
-    return button;
-  }));
-
-  $("factors").replaceChildren(...FACTORS.map(({ key, name, curve }, i) => {
-    const f = r.factors[key];
-    const rated = f.level in LABELS && f.level !== "unknown";
-    const open = curve && state.open.has(key);
-    const card = el("li", {
-      class: ["factor", curve ? "expandable" : "", i > 0 && !curve && FACTORS[i - 1].curve ? "group-start" : ""].join(" ").trim(),
-      "data-level": f.level,
-    },
-      curve ? el("button", { type: "button", class: "expand", "aria-expanded": String(open),
-        "aria-label": `${open ? "Hide" : "Show"} ${name.toLowerCase()} through the day` }) : null,
-      el("p", { class: "name" }, el("span", {}, name),
-        el("span", { class: "rating" }, rated ? LABELS[f.level] : null, curve ? el("span", { class: "chevron", "aria-hidden": "true" }) : null)),
-      el("p", { class: "value" }, f.value),
-      open ? dayCurve(key, selected) : null,
-      f.notes.map(n => el("p", { class: "note" }, n)));
-    card.querySelector(".expand")?.addEventListener("click", () => {
-      state.open.has(key) ? state.open.delete(key) : state.open.add(key);
-      renderHour();
-    });
-    return card;
-  }));
-}
-
 function select(hour) {
-  if (hour === (state.selected ?? nowHour() ?? spot.firstHour)) return;
+  if (hour === selectedHour()) return;
   state.selected = hour;
-  renderHour();
+  render();
 }
 
 // The day’s values for one factor: a line through the hours, dashed lines at the
 // caution and high thresholds with their numbers at the right end, and a dot at the
 // selected hour in its rating’s color.
-function dayCurve(key, selected) {
+function dayCurve(key, selected, hours) {
   const W = 300, H = 126, plotW = W - 34, top = 12, bottom = H - 22;
-  const points = state.hours.map(h => ({ hour: h.hour, f: h.factors[key] }));
+  const points = hours.map(h => ({ hour: h.hour, f: h.factors[key] }));
   const th = THRESHOLDS[key];
   const max = Math.max(th.high * 1.2, ...points.map(p => (p.f.amount ?? 0) * 1.1));
   const x = i => (i / (points.length - 1)) * plotW;
@@ -262,26 +327,121 @@ function dayCurve(key, selected) {
     labelAt(points.length - 1, hourLabel(points.at(-1).hour), "end"));
 }
 
-// Touch or click the strip and drag along it to scan the hours. Vertical drags still
-// scroll the page (touch-action: pan-y in app.css).
-{
-  const strip = $("strip");
-  let dragging = false;
-  const pick = e => {
-    const box = strip.getBoundingClientRect();
-    const i = Math.floor(((e.clientX - box.left) / box.width) * state.hours.length);
-    const h = state.hours[Math.min(state.hours.length - 1, Math.max(0, i))];
-    if (h) select(h.hour);
-  };
-  strip.addEventListener("pointerdown", e => {
-    if (e.button !== 0 || !state.hours.length) return;
-    dragging = true;
-    pick(e);
-    strip.setPointerCapture(e.pointerId);
-  });
-  strip.addEventListener("pointermove", e => { if (dragging) pick(e); });
-  for (const end of ["pointerup", "pointercancel"]) strip.addEventListener(end, () => { dragging = false; });
+// ---- Moving between days ------------------------------------------------------------------
+
+const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+let sliding = false;
+
+function show(date) {
+  state.date = date;
+  if (date === state.today) state.selected = null; // back on today, back to “now”
+  render();
 }
+
+// Slide one day over (delta ±1), or back into place (delta 0, or past either end).
+// fromPx: where a swipe left the track.
+async function slide(delta, fromPx = 0) {
+  if (sliding) return;
+  sliding = true;
+  const w = $("pager").clientWidth;
+  const target = delta ? state.dates[dayIndex(state.date) + delta] : null;
+  const to = target ? -w - delta * w : -w;
+  const track = $("track");
+  track.style.transform = "";
+  const duration = reduceMotion() ? 0 : 260;
+  const move = track.animate([{ transform: `translateX(${-w + fromPx}px)` }, { transform: `translateX(${to}px)` }],
+    { duration, easing: "cubic-bezier(.2,.8,.2,1)", fill: "forwards" });
+  // A browser that stops drawing frames (in the background, say) can leave an animation
+  // unfinished; the day changes on time regardless, so swipes never lock up.
+  await Promise.race([move.finished.catch(() => {}), new Promise(done => setTimeout(done, duration + 150))]);
+  if (target) show(target);
+  move.cancel();
+  sliding = false;
+}
+
+// A tap on a dot: slide to the day next door, or bring a farther day in from its side.
+function goTo(date) {
+  const delta = dayIndex(date) - dayIndex(state.date);
+  if (!delta || sliding) return;
+  if (Math.abs(delta) === 1) return slide(delta);
+  show(date);
+  if (!reduceMotion()) {
+    $("track").animate([{ opacity: 0.4, transform: `translateX(calc(-100% + ${Math.sign(delta) * 32}px))` },
+      { opacity: 1, transform: "translateX(-100%)" }], { duration: 220, easing: "cubic-bezier(.2,.8,.2,1)" });
+  }
+}
+
+// Touch the hour strip and drag along it to scan the hours. Anywhere else on the page,
+// a sideways swipe moves a day; vertical drags still scroll the page (touch-action:
+// pan-y in app.css). With a mouse, the dots and arrow keys change the day.
+{
+  const pager = $("pager"), track = $("track");
+  let gesture = null, swiped = false;
+  const strip = () => track.children[1]?.querySelector(".strip");
+  const pick = e => {
+    const s = strip();
+    if (!s) return;
+    const hours = state.days[state.date].hours;
+    const box = s.getBoundingClientRect();
+    const i = Math.floor(((e.clientX - box.left) / box.width) * hours.length);
+    select(hours[Math.min(hours.length - 1, Math.max(0, i))].hour);
+  };
+  pager.addEventListener("pointerdown", e => {
+    swiped = false;
+    if (e.button !== 0 || !state.dates.length || sliding) return;
+    if (e.target.closest(".strip") && e.target.closest(".strip") === strip()) {
+      gesture = { mode: "scrub" };
+      pick(e);
+      pager.setPointerCapture(e.pointerId);
+    } else if (e.pointerType !== "mouse") {
+      gesture = { mode: "pending", x: e.clientX, y: e.clientY, t: e.timeStamp, id: e.pointerId, dx: 0 };
+    }
+  });
+  pager.addEventListener("pointermove", e => {
+    if (!gesture) return;
+    if (gesture.mode === "scrub") return pick(e);
+    const dx = e.clientX - gesture.x, dy = e.clientY - gesture.y;
+    if (gesture.mode === "pending") {
+      if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+        gesture.mode = "swipe";
+        pager.setPointerCapture(gesture.id);
+      } else if (Math.abs(dy) > 10) {
+        gesture = null; // a scroll
+        return;
+      }
+    }
+    if (gesture.mode === "swipe") {
+      // Past either end the page follows the finger only partway.
+      const i = dayIndex(state.date);
+      const atEnd = (dx > 0 && i === 0) || (dx < 0 && i === state.dates.length - 1);
+      gesture.dx = atEnd ? dx * 0.35 : dx;
+      track.style.transform = `translateX(${-pager.clientWidth + gesture.dx}px)`;
+    }
+  });
+  pager.addEventListener("pointerup", e => {
+    if (gesture?.mode === "swipe") {
+      swiped = true;
+      const dx = e.clientX - gesture.x;
+      const fast = Math.abs(dx) / Math.max(1, e.timeStamp - gesture.t) > 0.5;
+      const far = Math.abs(dx) > pager.clientWidth * 0.2;
+      slide(far || fast ? (dx < 0 ? 1 : -1) : 0, gesture.dx);
+    }
+    gesture = null;
+  });
+  pager.addEventListener("pointercancel", () => {
+    if (gesture?.mode === "swipe") slide(0, gesture.dx);
+    gesture = null;
+  });
+  // A swipe that ends over a card isn’t a tap on it.
+  pager.addEventListener("click", e => { if (swiped) { e.stopPropagation(); e.preventDefault(); swiped = false; } }, true);
+}
+
+document.addEventListener("keydown", e => {
+  if (!state.dates.length || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+  if (e.key === "ArrowRight") slide(1);
+  else if (e.key === "ArrowLeft") slide(-1);
+});
 
 $("refresh").addEventListener("click", refresh);
 // Coming back to the app after a while (or the next morning) loads fresh data.

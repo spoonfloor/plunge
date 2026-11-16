@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { currentAt, peakCurrent, transferFactor, assessCurrent, assessWaves, assessWind, windPush, overall, summarizeDay, hourSpan,
   assessWaterQuality, waterAdvisories, advisorySummary, advisoryParagraphs, currentKnots, thresholds, skyKind, skyLine, skyText } from "../js/model.js";
 import { sunIsUp } from "../js/time.js";
+import { forDate } from "../js/sources.js";
 import spot from "../js/spots/crissy-east.js";
 import { zonedToMs, zonedParts } from "../js/time.js";
 
@@ -155,6 +156,22 @@ test("sky icon and line from the NWS short forecast", () => {
   assert.equal(skyLine({ text: "Rain Likely", rainPct: 70 }), "Rain · 70% chance");
   assert.equal(skyLine({ text: "Chance Showers And Thunderstorms", rainPct: 40 }), "Showers and thunderstorms · 40% chance");
   assert.equal(skyLine({ text: "Patchy Fog", rainPct: 5 }), "Patchy fog · 5% rain");
+});
+
+test("sky as reported at a station: its own words, and where", () => {
+  assert.equal(skyKind({ text: "A Few Clouds", day: true }), "partly-day");
+  assert.equal(skyKind({ text: "Rain and Fog/Mist", day: true }), "rain");
+  assert.equal(skyKind({ text: "Fog/Mist", day: true }), "fog");
+  assert.equal(skyLine({ text: "Light Rain", day: true, observed: "SFO" }), "Light rain · at SFO");
+});
+
+test("one day out of a multi-day load", () => {
+  const data = { currents: [1], waves: { "2026-11-16": { 6: { beachFt: 1 } } }, wind: null, waterTemp: { f: 55 } };
+  const day = forDate(data, "2026-11-17");
+  assert.deepEqual(day.waves, {}); // loaded, nothing that day
+  assert.equal(day.wind, null); // didn’t load
+  assert.deepEqual(day.currents, [1]);
+  assert.deepEqual(forDate(data, "2026-11-16").waves[6], { beachFt: 1 });
 });
 
 test("sky words from NWS gridpoint weather and cover", () => {

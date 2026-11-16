@@ -184,7 +184,8 @@ export function skyText({ cover, wx, day }) {
   return words[[12.5, 37.5, 62.5, 87.5].filter(t => cover > t).length];
 }
 
-// sky: { text: "Partly Sunny", rainPct: 20, day: true } from the NWS forecast →
+// sky: { text: "Partly Sunny", rainPct: 20, day: true } from the NWS forecast, or
+// { text: "A Few Clouds", day: true, observed: "SFO" } as reported at a station →
 // which icon to draw. Order matters: “Chance Showers And Thunderstorms” is a storm,
 // “Partly Cloudy” is partly, not cloudy.
 export function skyKind(sky) {
@@ -195,16 +196,21 @@ export function skyKind(sky) {
   if (/drizzle|light (rain|shower)/.test(t)) return "rain-light";
   if (/rain|shower|sleet|snow/.test(t)) return "rain";
   if (/fog|haze|smoke|mist/.test(t)) return "fog";
-  if (/partly|mostly sunny|mostly clear/.test(t)) return sky.day ? "partly-day" : "partly-night";
+  if (/partly|mostly sunny|mostly clear|few clouds/.test(t)) return sky.day ? "partly-day" : "partly-night";
   if (/cloud|overcast/.test(t)) return "cloud";
   return sky.day ? "sun" : "moon";
 }
 
 // “Partly sunny · 20% rain”, or “Light rain · 28% chance” when rain is forecast: the
 // percentage already says how likely, so NWS’s hedge words (“Slight chance”, “likely”)
-// go. “Patchy fog” keeps “Patchy”, which is about where, not how likely.
+// go. “Patchy fog” keeps “Patchy”, which is about where, not how likely. A reported sky
+// says where it was seen instead: “Light rain · at SFO”.
 const HEDGES = /^(slight chance|chance|isolated|scattered|numerous|occasional|periods of) | likely$/gi;
 export function skyLine(sky) {
+  if (sky.observed) {
+    const words = sky.text.toLowerCase();
+    return `${words.charAt(0).toUpperCase()}${words.slice(1)} · at ${sky.observed}`;
+  }
   const wet = /rain|shower|drizzle|thunder/i.test(sky.text);
   const words = (wet ? sky.text.replace(HEDGES, "") : sky.text).toLowerCase();
   return `${words.charAt(0).toUpperCase()}${words.slice(1)} · ${Math.round(sky.rainPct)}% ${wet ? "chance" : "rain"}`;

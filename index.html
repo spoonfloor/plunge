@@ -26,25 +26,17 @@
 </head>
 <body>
 <header id="top-bar">
-  <h1>Crissy East</h1>
-  <button id="refresh" type="button" aria-label="Refresh data"><span id="updated">Loading…</span></button>
+  <div class="top-row">
+    <h1>Crissy East</h1>
+    <button id="refresh" type="button" aria-label="Refresh data"><span id="updated">Loading…</span></button>
+  </div>
+  <div id="days" role="group" aria-label="Pick a day"></div>
 </header>
 <main class="first-load">
   <progress id="loader" value="0" aria-hidden="true"></progress>
-  <section id="hero" aria-live="polite">
-    <p id="hero-when" class="eyebrow"></p>
-    <p id="hero-level" class="level-word"></p>
-    <p id="hero-sky"></p>
-  </section>
-
-  <div id="sky-row" aria-hidden="true"></div>
-  <div id="strip" role="group" aria-label="Pick an hour"></div>
-
-  <p id="summary" class="card"></p>
-
-  <ul id="factors" aria-label="Factors for the selected hour"></ul>
-
-  <section id="advisories" class="factor" aria-label="NWS advisories"></section>
+  <!-- The day shown sits between the days before and after it; app.js fills these. -->
+  <div id="pager"><div id="track"></div></div>
+  <p id="announce" class="visually-hidden" aria-live="polite"></p>
 </main>
 </body>
 </html>

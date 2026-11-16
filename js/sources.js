@@ -1,6 +1,9 @@
 // Fetches each data source and normalizes it for model.js. Every source fails on its
 // own: one being down leaves the others working, and the last good copy from today
 // (saved on this device) stands in, marked with when it was fetched.
+//
+// One load covers every day the app shows. Sources that change hour to hour come back
+// by day ({ "2026-11-16": { 6: …, 7: … }, … }); forDate() picks out one day.
 
 import { addDays, compact, sunIsUp, zonedParts, zonedToMs } from "./time.js";
 import { skyText } from "./model.js";
@@ -19,35 +22,42 @@ async function getJson(url) {
 }
 const withQuery = (base, params) => `${base}?${new URLSearchParams(params)}`;
 
+// An empty hour map for each of dates: { "2026-11-16": {}, … }.
+const byDay = dates => Object.fromEntries(dates.map(d => [d, {}]));
+// "2026-11-16 13:00" (NOAA and Open-Meteo local times) → its date and hour.
+const localParts = t => ({ date: t.slice(0, 10), hour: Number(t.slice(11, 13)) });
+
 // NWS gridpoint series ({ validTime: "2026-11-16T06:00:00+00:00/PT2H", value }) → value
-// by local hour of date, each value spread over the hours it covers.
-function byHour(series, spot, date, map = v => v) {
-  const out = {};
+// by date and local hour, each value spread over the hours it covers.
+function byHour(series, spot, dates, map = v => v) {
+  const out = byDay(dates);
   for (const { validTime, value } of series) {
     const [start, span] = validTime.split("/");
     const [, d, h] = span.match(/P(?:(\d+)D)?T?(?:(\d+)H)?/).map(x => Number(x ?? 0));
     for (let i = 0; i < d * 24 + h; i++) {
       const at = zonedParts(Date.parse(start) + i * 3600000, spot.timeZone);
-      if (at.date === date) out[at.hour] = map(value);
+      if (out[at.date]) out[at.date][at.hour] = map(value);
     }
   }
   return out;
 }
+const isEmpty = days => Object.values(days).every(hours => !Object.keys(hours).length);
 // Gridpoint weather types, most significant first.
 const WX_RANK = ["thunderstorms", "freezing_rain", "freezing_drizzle", "snow", "snow_showers", "rain",
   "rain_showers", "drizzle", "fog", "freezing_fog", "haze", "smoke"];
 
 // Wave height at the beach estimated from Open-Meteo’s offshore swell forecast.
-async function offshoreWaves(spot, date) {
+async function offshoreWaves(spot, dates) {
   const vars = ["", "secondary_", "tertiary_"].flatMap(p =>
     [`${p}swell_wave_height`, `${p}swell_wave_period`, `${p}swell_wave_direction`]);
   const json = await getJson(withQuery("https://marine-api.open-meteo.com/v1/marine", {
     latitude: spot.waves.lat, longitude: spot.waves.lon, hourly: vars.join(","),
-    timezone: spot.timeZone, length_unit: "imperial", start_date: date, end_date: date,
+    timezone: spot.timeZone, length_unit: "imperial", start_date: dates[0], end_date: dates.at(-1),
   }));
-  const h = json.hourly, data = {};
+  const h = json.hourly, data = byDay(dates);
   h.time.forEach((t, i) => {
-    data[Number(t.slice(11, 13))] = { swells: ["", "secondary_", "tertiary_"].map(p => ({
+    const at = localParts(t);
+    if (data[at.date]) data[at.date][at.hour] = { swells: ["", "secondary_", "tertiary_"].map(p => ({
       ft: h[`${p}swell_wave_height`]?.[i], periodS: h[`${p}swell_wave_period`]?.[i],
       dirDeg: h[`${p}swell_wave_direction`]?.[i],
     })).filter(c => c.ft != null) };
@@ -58,13 +68,13 @@ async function offshoreWaves(spot, date) {
 
 // Each returns { data, link }: data in model.js’s shape, link a page a person can read.
 const FETCHERS = {
-  // NOAA slack and max events from 6 PM yesterday to 6 AM tomorrow, so every hour of
-  // today sits between two of them.
-  async currents(spot, date) {
+  // NOAA slack and max events from 6 PM the evening before the first day to 6 AM after
+  // the last, so every hour shown sits between two of them. One list, not by day.
+  async currents(spot, dates) {
     const { station, stationName } = spot.current;
     const json = await getJson(withQuery(COOPS, {
       ...COOPS_COMMON, product: "currents_predictions", station, interval: "MAX_SLACK",
-      begin_date: `${compact(addDays(date, -1))} 18:00`, end_date: `${compact(addDays(date, 1))} 06:00`,
+      begin_date: `${compact(addDays(dates[0], -1))} 18:00`, end_date: `${compact(addDays(dates.at(-1), 1))} 06:00`,
     }));
     const data = json.current_predictions.cp.map(e => ({
       ms: zonedToMs(e.Time, spot.timeZone), knots: Number(e.Velocity_Major), type: e.Type,
@@ -73,14 +83,17 @@ const FETCHERS = {
       link: `https://tidesandcurrents.noaa.gov/noaacurrents/predictions?id=${station}_1` };
   },
 
-  async tide(spot, date) {
+  async tide(spot, dates) {
     const { station, stationName } = spot.tide;
     const json = await getJson(withQuery(COOPS, {
       ...COOPS_COMMON, product: "predictions", station, interval: "h", datum: "MLLW",
-      begin_date: compact(date), end_date: compact(date),
+      begin_date: compact(dates[0]), end_date: compact(dates.at(-1)),
     }));
-    const data = {};
-    for (const p of json.predictions) data[Number(p.t.slice(11, 13))] = Number(p.v);
+    const data = byDay(dates);
+    for (const p of json.predictions) {
+      const at = localParts(p.t);
+      if (data[at.date]) data[at.date][at.hour] = Number(p.v);
+    }
     return { data, label: `NOAA tide predictions, ${stationName} (${station})`,
       link: `https://tidesandcurrents.noaa.gov/stationhome.html?id=${station}` };
   },
@@ -115,52 +128,68 @@ const FETCHERS = {
 
   // Wave height at the beach from the NWS Nearshore Wave Prediction System, read
   // through Plunge’s server function (the model’s files are too big for a phone).
-  // When that fails, an estimate from the offshore forecast stands in.
-  async waves(spot, date) {
+  // Its latest run starts this morning and reaches about six days out, so for hours
+  // it doesn’t cover (yesterday, the tail of the last day) or when it fails, an
+  // estimate from the offshore forecast stands in.
+  async waves(spot, dates) {
+    const data = byDay(dates);
+    let run = null;
     try {
       const json = await getJson(`${SERVER}/waves`);
-      const data = {};
       for (const { time, ft } of json.hours) {
         const at = zonedParts(Date.parse(time), spot.timeZone);
-        if (at.date === date) data[at.hour] = { beachFt: ft };
+        if (data[at.date]) data[at.date][at.hour] = { beachFt: ft };
       }
-      if (!Object.keys(data).length) throw new Error("No hours for today in the latest run");
-      return { data, label: `NWS Nearshore Wave Prediction System, run of ${json.run}`,
-        link: "https://polar.ncep.noaa.gov/nwps/viewer.shtml" };
-    } catch {
-      return await offshoreWaves(spot, date);
+      run = json.run;
+    } catch { /* the offshore estimate covers every hour below */ }
+    const gaps = dates.some(date => {
+      for (let hour = spot.firstHour; hour <= spot.lastHour; hour++) if (!data[date][hour]) return true;
+      return false;
+    });
+    let offshore = null;
+    if (gaps) {
+      try {
+        offshore = await offshoreWaves(spot, dates);
+        for (const date of dates) data[date] = { ...offshore.data[date], ...data[date] };
+      } catch (err) { if (!run) throw err; }
     }
+    if (!run) return offshore;
+    return { data, label: `NWS Nearshore Wave Prediction System, run of ${run}${offshore ? `, with ${offshore.label} where the run doesn’t reach` : ""}`,
+      link: "https://polar.ncep.noaa.gov/nwps/viewer.shtml" };
   },
 
-  async wind(spot, date, shared) {
+  async wind(spot, dates, shared) {
     const json = await shared.nwsHourly();
-    const data = {};
+    const data = byDay(dates);
     for (const p of json.properties.periods) {
       const at = zonedParts(Date.parse(p.startTime), spot.timeZone);
-      if (at.date !== date) continue;
+      if (!data[at.date]) continue;
       const mph = Math.max(...(p.windSpeed.match(/\d+/g) ?? []).map(Number));
-      if (Number.isFinite(mph)) data[at.hour] = { mph, dir: p.windDirection };
+      if (Number.isFinite(mph)) data[at.date][at.hour] = { mph, dir: p.windDirection };
     }
     return { data, label: "National Weather Service hourly forecast",
       link: `https://forecast.weather.gov/MapClick.php?lat=${spot.lat}&lon=${spot.lon}` };
   },
 
   // Sky and chance of rain by hour, from the NWS gridpoint forecast that the hourly
-  // forecast is built from. Unlike the hourly forecast it starts the evening before, so
-  // hours already past have a sky too (as forecast for them, not as observed).
-  async sky(spot, date, shared) {
+  // forecast is built from. Both drop hours once they pass, though the gridpoint one
+  // sometimes keeps a few: those past hours get a sky as forecast for them, and
+  // skyObserved fills the rest.
+  async sky(spot, dates, shared) {
     const grid = (await shared.nwsGrid()).properties;
-    const cover = byHour(grid.skyCover.values, spot, date);
-    const rainPct = byHour(grid.probabilityOfPrecipitation.values, spot, date);
+    const cover = byHour(grid.skyCover.values, spot, dates);
+    const rainPct = byHour(grid.probabilityOfPrecipitation.values, spot, dates);
     // The weather that matters most when an hour lists more than one.
-    const wx = byHour(grid.weather.values, spot, date, v => v.filter(w => w.weather)
+    const wx = byHour(grid.weather.values, spot, dates, v => v.filter(w => w.weather)
       .sort((a, b) => WX_RANK.indexOf(a.weather) - WX_RANK.indexOf(b.weather))[0] ?? null);
-    const data = {};
-    for (let hour = spot.firstHour; hour <= spot.lastHour; hour++) {
-      if (cover[hour] == null) continue;
-      const day = sunIsUp(zonedToMs(`${date} ${String(hour).padStart(2, "0")}:30`, spot.timeZone), spot.lat, spot.lon);
-      const w = wx[hour] && { coverage: wx[hour].coverage, weather: wx[hour].weather, intensity: wx[hour].intensity };
-      data[hour] = { text: skyText({ cover: cover[hour], wx: w, day }), rainPct: rainPct[hour] ?? 0, day };
+    const data = byDay(dates);
+    for (const date of dates) {
+      for (let hour = spot.firstHour; hour <= spot.lastHour; hour++) {
+        if (cover[date][hour] == null) continue;
+        const day = sunIsUp(zonedToMs(`${date} ${String(hour).padStart(2, "0")}:30`, spot.timeZone), spot.lat, spot.lon);
+        const w = wx[date][hour] && { coverage: wx[date][hour].coverage, weather: wx[date][hour].weather, intensity: wx[date][hour].intensity };
+        data[date][hour] = { text: skyText({ cover: cover[date][hour], wx: w, day }), rainPct: rainPct[date][hour] ?? 0, day };
+      }
     }
     // For hours the hourly forecast covers, its own words and day/night win: NWS’s cover
     // cutoffs don’t match the textbook ones above (19% cover reads “Sunny”), so this keeps
@@ -168,25 +197,46 @@ const FETCHERS = {
     const hourly = await shared.nwsHourly().catch(() => null);
     for (const p of hourly?.properties.periods ?? []) {
       const at = zonedParts(Date.parse(p.startTime), spot.timeZone);
-      if (at.date !== date || !(at.hour in data)) continue;
-      data[at.hour] = { text: p.shortForecast, rainPct: p.probabilityOfPrecipitation?.value ?? 0, day: p.isDaytime };
+      if (!data[at.date]?.[at.hour]) continue;
+      data[at.date][at.hour] = { text: p.shortForecast, rainPct: p.probabilityOfPrecipitation?.value ?? 0, day: p.isDaytime };
     }
-    if (!Object.keys(data).length) throw new Error("No hours for today in the gridpoint forecast");
+    if (isEmpty(data)) throw new Error("No hours in the gridpoint forecast");
     return { data, label: "National Weather Service forecast",
       link: `https://forecast.weather.gov/MapClick.php?lat=${spot.lat}&lon=${spot.lon}` };
   },
 
+  // The sky as reported by the nearest NWS station that reports it, for hours the
+  // forecast has already dropped (yesterday, mostly). Each hour takes the report
+  // nearest its half past.
+  async skyObserved(spot, dates) {
+    const { station, stationName } = spot.skyObserved;
+    const start = new Date(zonedToMs(`${dates[0]} 00:00`, spot.timeZone)).toISOString();
+    const json = await getJson(withQuery(`https://api.weather.gov/stations/${station}/observations`, { start }));
+    const data = byDay(dates), offBy = byDay(dates);
+    for (const { properties: p } of json.features) {
+      if (!p.textDescription) continue;
+      const ms = Date.parse(p.timestamp);
+      const at = zonedParts(ms, spot.timeZone);
+      if (!data[at.date] || offBy[at.date][at.hour] <= Math.abs(at.minute - 30)) continue;
+      offBy[at.date][at.hour] = Math.abs(at.minute - 30);
+      data[at.date][at.hour] = { text: p.textDescription, day: sunIsUp(ms, spot.lat, spot.lon), observed: stationName };
+    }
+    if (isEmpty(data)) throw new Error("No sky reports");
+    return { data, label: `NWS observations, ${stationName} (${station})`,
+      link: `https://forecast.weather.gov/data/obhistory/${station}.html` };
+  },
+
   // Measured wind at the Presidio pier, about 1.4 km west, for hours already past.
-  async windObserved(spot, date) {
+  async windObserved(spot, dates) {
     const { station, stationName } = spot.tide;
     const json = await getJson(withQuery(COOPS, {
       ...COOPS_COMMON, product: "wind", station, interval: "h",
-      begin_date: compact(date), end_date: compact(date),
+      begin_date: compact(dates[0]), end_date: compact(dates.at(-1)),
     }));
-    const data = {};
+    const data = byDay(dates);
     for (const w of json.data) {
-      const knots = Number(w.s);
-      if (Number.isFinite(knots)) data[Number(w.t.slice(11, 13))] = { mph: Math.round(knots * 1.15078), dir: w.dr, observed: true };
+      const knots = Number(w.s), at = localParts(w.t);
+      if (Number.isFinite(knots) && data[at.date]) data[at.date][at.hour] = { mph: Math.round(knots * 1.15078), dir: w.dr, observed: true };
     }
     return { data, label: `NOAA measured wind, ${stationName} (${station})`,
       link: `https://tidesandcurrents.noaa.gov/stationhome.html?id=${station}` };
@@ -237,24 +287,34 @@ const NAMES = {
   currents: "NOAA current predictions", tide: "NOAA tide predictions",
   waterTemp: "NOAA water temperature", waves: "NWS nearshore wave forecast",
   wind: "National Weather Service hourly forecast", sky: "National Weather Service forecast",
-  windObserved: "NOAA measured wind",
+  windObserved: "NOAA measured wind", skyObserved: "NWS observations",
   waterQuality: "SFPUC beach water quality", alerts: "National Weather Service active alerts",
 };
+// Sources that come back by day. The rest are one reading or list for every day.
+const BY_DAY = ["tide", "waves", "wind", "windObserved", "sky", "skyObserved"];
+
+// One day out of loadAll’s data, in the shape model.js’s assessHour takes. A source
+// that loaded but has nothing for the day gives an empty day, not null, so the card
+// says there’s no forecast for the hour rather than that the source didn’t load.
+export function forDate(data, date) {
+  return { ...data, ...Object.fromEntries(BY_DAY.map(k => [k, data[k] ? data[k][date] ?? {} : null])) };
+}
 
 const cacheKey = (spot, key) => `plunge:${spot.id}:${key}`;
-function readCache(spot, key, date) {
+function readCache(spot, key, dates) {
   try {
     const saved = JSON.parse(localStorage.getItem(cacheKey(spot, key)));
-    return saved?.date === date ? saved : null;
+    return saved?.dates === dates ? saved : null;
   } catch { return null; }
 }
 function writeCache(spot, key, entry) {
   try { localStorage.setItem(cacheKey(spot, key), JSON.stringify(entry)); } catch { /* storage unavailable */ }
 }
 
+// dates: the days to load, in order ("2026-11-15", "2026-11-16", …).
 // Resolves to { data: { currents, tide, ... }, sources: [{ key, label, link, fetchedAt, stale, error }] }.
 // onProgress(done, total), if given, is called as each source settles, loaded or not.
-export async function loadAll(spot, date, onProgress) {
+export async function loadAll(spot, dates, onProgress) {
   const keys = Object.keys(FETCHERS);
   let settled = 0;
   // Requests more than one fetcher reads, made once per load.
@@ -271,18 +331,18 @@ export async function loadAll(spot, date, onProgress) {
   }));
   async function loadOne(key) {
     try {
-      const got = await FETCHERS[key](spot, date, shared);
-      const entry = { date, ...got, fetchedAt: Date.now() };
+      const got = await FETCHERS[key](spot, dates, shared);
+      const entry = { dates: dates.join(), ...got, fetchedAt: Date.now() };
       writeCache(spot, key, entry);
       return { key, ...entry, stale: false };
     } catch (err) {
-      const saved = readCache(spot, key, date);
+      const saved = readCache(spot, key, dates.join());
       return saved ? { key, ...saved, stale: true, error: err.message }
         : { key, label: NAMES[key], data: null, error: err.message };
     }
   }
   return {
     data: Object.fromEntries(results.map(r => [r.key, r.data])),
-    sources: results.map(({ data, date: _d, ...meta }) => meta),
+    sources: results.map(({ data, dates: _d, ...meta }) => meta),
   };
 }

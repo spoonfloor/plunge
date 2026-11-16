@@ -33,6 +33,9 @@ export default {
 
   tide: { station: "9414290", stationName: "San Francisco (Presidio)" },
   waterTemp: { station: "9414290", stationName: "San Francisco (Presidio)" },
+  // The nearest NWS station that reports the sky, about 17 km south. Fills in the sky
+  // for hours the forecast has dropped. It’s often clearer than the beach in fog.
+  skyObserved: { station: "KSFO", stationName: "SFO" },
 
   waves: {
     // Open-Meteo marine model point just outside the Golden Gate.
