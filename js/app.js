@@ -60,6 +60,23 @@ const SKY_ICONS = {
     svg("path", { d: "M12.5 15.5l-2 3.5h3l-2 3.5" })],
   fog: () => [svg("path", { d: "M4 8h16M3 12h18M5 16h14M8 20h8" })],
 };
+// What’s driving the selected hour’s rating, after the time on the Risk line: icons for
+// current, waves and wind, the reading itself for water temperature. Water quality has
+// none: a posted beach is High all day and the summary says why.
+const DRIVER_ICONS = {
+  current: () => [svg("path", { d: "M3 9c2.5-2 5-2 7.5 0s5 2 7.5 0 3-1.5 3-1.5M3 15c2.5-2 5-2 7.5 0s5 2 7.5 0 3-1.5 3-1.5" })],
+  waves: () => [svg("path", { d: "M2.5 16c2 0 3-1 4.5-3.5S10 7 13 7c2.5 0 3.5 2 3 3.5-1.5-1-3-.3-3 1.3 0 2.2 2.5 4.2 6 4.2h2.5" }),
+    svg("path", { d: "M2.5 20c2.5 0 3.5-1.2 6-1.2s3.5 1.2 6 1.2 3.5-1.2 6-1.2" })],
+  wind: () => [svg("path", { d: "M3 9h11a3 3 0 1 0-3-3" }), svg("path", { d: "M3 13h15a3 3 0 1 1-3 3" }), svg("path", { d: "M3 17h7" })],
+};
+function driverMarks(r) {
+  if (r.overall.level !== "caution" && r.overall.level !== "high") return [];
+  return r.overall.drivers.map(k =>
+    DRIVER_ICONS[k] ? svg("svg", { class: "driver-icon", viewBox: "0 0 24 24", "aria-hidden": "true" }, DRIVER_ICONS[k]())
+    : k === "waterTemp" ? el("span", { class: "driver-temp", "aria-hidden": "true" }, r.factors.waterTemp.value.replace(/F$/, ""))
+    : null).filter(Boolean);
+}
+
 const skyIcon = sky => svg("svg", { class: "sky-icon", viewBox: "0 0 24 24", "aria-hidden": "true" }, SKY_ICONS[skyKind(sky)]());
 
 const state = { date: null, hours: [], sky: {}, selected: null, open: new Set(), lastLoad: 0, loading: false };
@@ -144,7 +161,11 @@ function renderHour() {
   const isNow = h => h === current && !isPast(h);
 
   $("hero").dataset.level = r.overall.level;
-  $("hero-when").textContent = `Risk · ${isNow(selected) ? `Now, ${hourLabel(selected)}` : hourLabel(selected)}`;
+  const marks = driverMarks(r);
+  $("hero-when").replaceChildren(
+    el("span", { class: "when" }, `Risk · ${isNow(selected) ? `Now, ${hourLabel(selected)}` : hourLabel(selected)}`),
+    marks.length ? el("span", { class: "drivers", role: "img",
+      "aria-label": `because of ${r.overall.drivers.map(k => FACTORS.find(f => f.key === k)?.name.toLowerCase()).join(" and ")}` }, marks) : null);
   $("hero-level").textContent = LABELS[r.overall.level];
   const sky = state.sky[selected];
   $("hero-sky").replaceChildren(...(sky ? [skyIcon(sky), el("span", {}, skyLine(sky))] : []));

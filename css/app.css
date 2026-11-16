@@ -48,6 +48,14 @@ a { color: var(--accent-color); }
 
 /* The selected hour, big. */
 #hero { padding: 20px 0 16px; }
+/* Risk · time, then what’s driving the rating, in the rating’s color. The time never
+   splits; on a narrow screen the marks wrap instead. */
+#hero-when { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 2px; }
+#hero-when .when { white-space: nowrap; }
+#hero-when .drivers { display: flex; align-items: center; gap: 6px; color: var(--chip-color); }
+.driver-icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round; }
+.driver-temp { font-variant-numeric: tabular-nums; }
 .level-word { margin: 2px 0 4px; font-size: 56px; line-height: 1.05; font-weight: 700;
   letter-spacing: -0.02em; color: var(--chip-color, var(--text-color)); }
 #hero-sky { display: flex; align-items: center; gap: 8px; min-height: 24px; margin: 0;
