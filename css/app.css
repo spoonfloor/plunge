@@ -114,6 +114,8 @@ a { color: var(--accent-color); }
   border: solid var(--text-muted); border-width: 0 2px 2px 0; transform: rotate(45deg); }
 .expand[aria-expanded="true"] ~ .name .chevron, #advisories details[open] summary::after {
   margin: 4px 4px 0 0; transform: rotate(-135deg); }
+/* On factor cards the chevron takes the rating’s color, like the label beside it. */
+.factor .chevron { border-color: currentColor; }
 
 /* The day’s curve inside an open card. */
 .curve { display: block; width: 100%; height: auto; margin: 8px 0 6px; overflow: visible; }
