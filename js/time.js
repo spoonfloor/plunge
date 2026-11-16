@@ -50,3 +50,18 @@ export function hourLabel(hour) {
 export function clockTime(ms, timeZone) {
   return new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" }).format(ms);
 }
+
+// Whether the sun is above the horizon at an instant and place: the standard
+// low-precision solar position (good to a minute or two), with −0.833° for refraction
+// and the sun’s radius.
+export function sunIsUp(ms, lat, lon) {
+  const rad = Math.PI / 180, d = ms / 86400000 - 10957.5; // days since J2000
+  const g = (357.529 + 0.98560028 * d) * rad;
+  const L = (280.459 + 0.98564736 * d + 1.915 * Math.sin(g) + 0.02 * Math.sin(2 * g)) * rad;
+  const e = (23.439 - 0.00000036 * d) * rad;
+  const ra = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L)), dec = Math.asin(Math.sin(e) * Math.sin(L));
+  const gmst = (18.697374558 + 24.06570982441908 * d) * 15 * rad;
+  const h = gmst + lon * rad - ra;
+  const elevation = Math.asin(Math.sin(lat * rad) * Math.sin(dec) + Math.cos(lat * rad) * Math.cos(dec) * Math.cos(h));
+  return elevation > -0.833 * rad;
+}

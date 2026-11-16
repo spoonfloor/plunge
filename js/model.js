@@ -153,13 +153,37 @@ export function assessWaterQuality(quality) {
 
 // ---- Sky ---------------------------------------------------------------------------
 
-// sky: { text: "Partly Sunny", rainPct: 20, day: true } from the NWS hourly forecast →
+// NWS gridpoint weather for one hour → the words the NWS hourly forecast would use.
+// cover: sky cover %, wx: { coverage, weather, intensity } or null, day: sun is up.
+// “Slight chance light rain”, “Light rain likely”, “Patchy fog”, “Mostly sunny”.
+const COVERAGE = { slight_chance: "Slight chance", chance: "Chance", isolated: "Isolated", scattered: "Scattered",
+  numerous: "Numerous", patchy: "Patchy", areas: "Areas of", widespread: "Widespread", occasional: "Occasional",
+  frequent: "Frequent", intermittent: "Intermittent", periods: "Periods of", brief: "Brief" };
+const WEATHER = { rain_showers: "showers", thunderstorms: "thunderstorms", freezing_fog: "freezing fog",
+  freezing_rain: "freezing rain", freezing_drizzle: "freezing drizzle", snow_showers: "snow showers" };
+export function skyText({ cover, wx, day }) {
+  if (wx) {
+    const intensity = { very_light: "very light", light: "light", heavy: "heavy" }[wx.intensity];
+    const what = [intensity, WEATHER[wx.weather] ?? wx.weather.replace(/_/g, " ")].filter(Boolean).join(" ");
+    const text = wx.coverage === "likely" ? `${what} likely` : [COVERAGE[wx.coverage], what].filter(Boolean).join(" ");
+    return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+  }
+  // NWS sky-cover words, in eighths of the sky: 0–1 clear, 1–3 mostly, 3–5 partly, 5–7 mostly cloudy.
+  const words = day ? ["Sunny", "Mostly sunny", "Partly sunny", "Mostly cloudy", "Cloudy"]
+    : ["Clear", "Mostly clear", "Partly cloudy", "Mostly cloudy", "Cloudy"];
+  return words[[12.5, 37.5, 62.5, 87.5].filter(t => cover > t).length];
+}
+
+// sky: { text: "Partly Sunny", rainPct: 20, day: true } from the NWS forecast →
 // which icon to draw. Order matters: “Chance Showers And Thunderstorms” is a storm,
 // “Partly Cloudy” is partly, not cloudy.
 export function skyKind(sky) {
   const t = sky.text.toLowerCase();
   if (/thunder|t-storm/.test(t)) return "storm";
-  if (/rain|shower|drizzle|sleet|snow/.test(t)) return "rain";
+  // Drops show intensity; the chance of rain is the % on the sky line.
+  if (/heavy/.test(t) && /rain|shower/.test(t)) return "rain-heavy";
+  if (/drizzle|light (rain|shower)/.test(t)) return "rain-light";
+  if (/rain|shower|sleet|snow/.test(t)) return "rain";
   if (/fog|haze|smoke|mist/.test(t)) return "fog";
   if (/partly|mostly sunny|mostly clear/.test(t)) return sky.day ? "partly-day" : "partly-night";
   if (/cloud|overcast/.test(t)) return "cloud";
@@ -259,15 +283,18 @@ export function overall(factors) {
 
 const LEVEL_WORDS = { low: "Low", caution: "Caution", high: "High", unknown: "No rating" };
 
-// “Low 6 AM–1 PM. High 1–3 PM, because of the wind. Caution 3–6 PM, …”
+// “Low 6 AM–1 PM. High 1–3 PM, because of wind. Caution 3–6 PM, because of waves.”
 // hours: assessHour results in time order.
 export function summarizeDay(hours) {
   const runs = [];
   for (const h of hours) {
     const last = runs.at(-1);
-    if (last && last.level === h.overall.level && last.to === h.hour) {
+    // A run ends where the rating or its reasons change, so every reason named is true
+    // for every hour it covers.
+    const same = last && last.level === h.overall.level && last.to === h.hour
+      && last.drivers.join() === h.overall.drivers.join();
+    if (same) {
       last.to = h.hour + 1;
-      for (const d of h.overall.drivers) if (!last.drivers.includes(d)) last.drivers.push(d);
     } else {
       runs.push({ level: h.overall.level, from: h.hour, to: h.hour + 1, drivers: [...h.overall.drivers] });
     }
@@ -278,7 +305,7 @@ export function summarizeDay(hours) {
     const what = list(r.drivers.map(k => NAMES[k]));
     return r.level === "unknown"
       ? `No rating ${span}: missing ${what} data.`
-      : `${LEVEL_WORDS[r.level]} ${span}, because of the ${what}.`;
+      : `${LEVEL_WORDS[r.level]} ${span}, because of ${what}.`;
   }).join(" ");
 }
 

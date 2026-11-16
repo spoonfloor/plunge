@@ -50,6 +50,10 @@ const SKY_ICONS = {
     CLOUD("M6.5 20h8.5a3.5 3.5 0 0 0 .3-7A5 5 0 0 0 5.8 14 3 3 0 0 0 6.5 20z")],
   "partly-night": () => [svg("path", { d: "M21 11A4 4 0 1 1 15.5 5.3a3.2 3.2 0 0 0 5.5 5.7z" }),
     CLOUD("M6.5 20h8.5a3.5 3.5 0 0 0 .3-7A5 5 0 0 0 5.8 14 3 3 0 0 0 6.5 20z")],
+  "rain-light": () => [CLOUD("M7 14.5h10a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 6.6 8.6 3 3 0 0 0 7 14.5z"),
+    svg("path", { d: "M9 18.5v.01M15 18.5v.01M12 21v.01", class: "dots" })],
+  "rain-heavy": () => [CLOUD("M7 13.5h10a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 6.6 7.6 3 3 0 0 0 7 13.5z"),
+    svg("path", { d: "M7.5 16l-1.5 5M11 16l-1.5 5M14.5 16l-1.5 5M18 16l-1.5 5", class: "heavy" })],
   rain: () => [CLOUD("M7 14.5h10a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 6.6 8.6 3 3 0 0 0 7 14.5z"),
     svg("path", { d: "M8.5 17.5l-1 3M12.5 17.5l-1 3M16.5 17.5l-1 3" })],
   storm: () => [CLOUD("M7 14.5h10a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 6.6 8.6 3 3 0 0 0 7 14.5z"),
@@ -197,7 +201,7 @@ function select(hour) {
 // caution and high thresholds with their numbers at the right end, and a dot at the
 // selected hour in its rating’s color.
 function dayCurve(key, selected) {
-  const W = 300, H = 84, plotW = W - 34, top = 8, bottom = 62;
+  const W = 300, H = 126, plotW = W - 34, top = 12, bottom = H - 22;
   const points = state.hours.map(h => ({ hour: h.hour, f: h.factors[key] }));
   const th = THRESHOLDS[key];
   const max = Math.max(th.high * 1.2, ...points.map(p => (p.f.amount ?? 0) * 1.1));

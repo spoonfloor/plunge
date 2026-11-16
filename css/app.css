@@ -52,18 +52,20 @@ a { color: var(--accent-color); }
   letter-spacing: -0.02em; color: var(--chip-color, var(--text-color)); }
 #hero-sky { display: flex; align-items: center; gap: 8px; min-height: 24px; margin: 0;
   font-size: 17px; line-height: 1.4; color: var(--text-muted); }
-#hero-sky .sky-icon { width: 22px; height: 22px; }
+#hero-sky .sky-icon { width: 26px; height: 26px; }
 
 /* Sky icons: outline, in the text color. Clouds are filled with the surface behind them
    so a sun or moon behind a cloud is hidden. */
 .sky-icon { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .sky-icon .cloud { fill: var(--page-color); }
+.sky-icon .dots { stroke-width: 2.4; }
+.sky-icon .heavy { stroke-width: 2; }
 
 /* One sky icon above each hour of the strip. */
 #sky-row { display: grid; grid-template-columns: repeat(var(--hours, 12), 1fr); gap: 3px; margin-bottom: 6px;
   color: var(--text-muted); }
-#sky-row span { display: flex; justify-content: center; height: 22px; }
-#sky-row .sky-icon { width: 20px; height: 20px; }
+#sky-row span { display: flex; justify-content: center; height: 26px; }
+#sky-row .sky-icon { width: 24px; height: 24px; }
 #sky-row .past { opacity: 0.4; }
 
 /* One column per hour, colored by rating. Tap to select. */

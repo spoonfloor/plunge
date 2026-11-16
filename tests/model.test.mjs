@@ -2,7 +2,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { currentAt, peakCurrent, transferFactor, assessCurrent, assessWaves, assessWind, windPush, overall, summarizeDay, hourSpan,
-  assessWaterQuality, waterAdvisories, advisorySummary, advisoryParagraphs, currentKnots, thresholds, skyKind, skyLine } from "../js/model.js";
+  assessWaterQuality, waterAdvisories, advisorySummary, advisoryParagraphs, currentKnots, thresholds, skyKind, skyLine, skyText } from "../js/model.js";
+import { sunIsUp } from "../js/time.js";
 import spot from "../js/spots/crissy-east.js";
 import { zonedToMs, zonedParts } from "../js/time.js";
 
@@ -64,12 +65,13 @@ test("local times convert in Los Angeles, across DST", () => {
   assert.deepEqual(zonedParts(Date.parse("2026-11-15T14:09:00Z"), tz), { date: "2026-11-15", hour: 6, minute: 9 });
 });
 
-test("day summary groups hours by rating", () => {
+test("day summary groups hours by rating and reason", () => {
   const h = (hour, level, drivers = []) => ({ hour, overall: { level, drivers } });
   const day = [h(6, "low"), h(7, "low"), h(8, "high", ["wind"]), h(9, "high", ["wind", "waves"]),
     h(10, "caution", ["current"]), h(11, "low")];
   assert.equal(summarizeDay(day),
-    "Low 6–8 AM. High 8–10 AM, because of the wind and waves. Caution 10–11 AM, because of the current. Low 11 AM–12 PM.");
+    "Low 6–8 AM. High 8–9 AM, because of wind. High 9–10 AM, because of wind and waves. Caution 10–11 AM, because of current. Low 11 AM–12 PM.");
+  assert.equal(summarizeDay([h(6, "caution", ["waves"]), h(7, "caution", ["waves"])]), "Caution 6–8 AM, because of waves.");
   assert.equal(hourSpan(11, 13), "11 AM–1 PM");
   assert.equal(hourSpan(13, 18), "1–6 PM");
 });
@@ -137,9 +139,32 @@ test("sky icon and line from the NWS short forecast", () => {
   assert.equal(skyKind({ text: "Partly Cloudy", day: true }), "partly-day");
   assert.equal(skyKind({ text: "Mostly Clear", day: false }), "partly-night");
   assert.equal(skyKind({ text: "Mostly Cloudy", day: true }), "cloud");
-  assert.equal(skyKind({ text: "Chance Light Rain", day: true }), "rain");
+  assert.equal(skyKind({ text: "Chance Light Rain", day: true }), "rain-light");
+  assert.equal(skyKind({ text: "Patchy Drizzle", day: true }), "rain-light");
+  assert.equal(skyKind({ text: "Rain Showers Likely", day: true }), "rain");
+  assert.equal(skyKind({ text: "Heavy Rain", day: true }), "rain-heavy");
   assert.equal(skyKind({ text: "Chance Showers And Thunderstorms", day: true }), "storm");
   assert.equal(skyKind({ text: "Patchy Fog", day: true }), "fog");
   assert.equal(skyLine({ text: "Partly Sunny", rainPct: 20 }), "Partly sunny · 20% rain");
   assert.equal(skyLine({ text: "Chance Light Rain", rainPct: 28 }), "Chance light rain · 28%");
+});
+
+test("sky words from NWS gridpoint weather and cover", () => {
+  assert.equal(skyText({ cover: 90, wx: { coverage: "slight_chance", weather: "rain", intensity: "light" }, day: true }), "Slight chance light rain");
+  assert.equal(skyText({ cover: 90, wx: { coverage: "likely", weather: "rain", intensity: "light" }, day: true }), "Light rain likely");
+  assert.equal(skyText({ cover: 90, wx: { coverage: "definite", weather: "rain", intensity: "moderate" }, day: true }), "Rain");
+  assert.equal(skyText({ cover: 90, wx: { coverage: "chance", weather: "rain_showers", intensity: null }, day: true }), "Chance showers");
+  assert.equal(skyText({ cover: 50, wx: { coverage: "patchy", weather: "fog", intensity: null }, day: true }), "Patchy fog");
+  assert.equal(skyText({ cover: 5, wx: null, day: true }), "Sunny");
+  assert.equal(skyText({ cover: 30, wx: null, day: false }), "Mostly clear");
+  assert.equal(skyText({ cover: 50, wx: null, day: true }), "Partly sunny");
+  assert.equal(skyText({ cover: 95, wx: null, day: true }), "Cloudy");
+});
+
+test("sun up or down over San Francisco on Nov 16, 2026 (sunrise ≈ 6:54 AM, sunset ≈ 4:57 PM PST)", () => {
+  const at = (h, m) => Date.UTC(2026, 10, 16, h + 8, m);
+  assert.equal(sunIsUp(at(6, 40), 37.8, -122.45), false);
+  assert.equal(sunIsUp(at(7, 10), 37.8, -122.45), true);
+  assert.equal(sunIsUp(at(16, 40), 37.8, -122.45), true);
+  assert.equal(sunIsUp(at(17, 10), 37.8, -122.45), false);
 });

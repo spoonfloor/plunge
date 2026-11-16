@@ -2,7 +2,8 @@
 // own: one being down leaves the others working, and the last good copy from today
 // (saved on this device) stands in, marked with when it was fetched.
 
-import { addDays, compact, zonedParts, zonedToMs } from "./time.js";
+import { addDays, compact, sunIsUp, zonedParts, zonedToMs } from "./time.js";
+import { skyText } from "./model.js";
 
 const COOPS = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter";
 // Plunge’s server function (server/functions/plunge), for sources browsers can’t read.
@@ -17,6 +18,24 @@ async function getJson(url) {
   return json;
 }
 const withQuery = (base, params) => `${base}?${new URLSearchParams(params)}`;
+
+// NWS gridpoint series ({ validTime: "2026-11-16T06:00:00+00:00/PT2H", value }) → value
+// by local hour of date, each value spread over the hours it covers.
+function byHour(series, spot, date, map = v => v) {
+  const out = {};
+  for (const { validTime, value } of series) {
+    const [start, span] = validTime.split("/");
+    const [, d, h] = span.match(/P(?:(\d+)D)?T?(?:(\d+)H)?/).map(x => Number(x ?? 0));
+    for (let i = 0; i < d * 24 + h; i++) {
+      const at = zonedParts(Date.parse(start) + i * 3600000, spot.timeZone);
+      if (at.date === date) out[at.hour] = map(value);
+    }
+  }
+  return out;
+}
+// Gridpoint weather types, most significant first.
+const WX_RANK = ["thunderstorms", "freezing_rain", "freezing_drizzle", "snow", "snow_showers", "rain",
+  "rain_showers", "drizzle", "fog", "freezing_fog", "haze", "smoke"];
 
 // Wave height at the beach estimated from Open-Meteo’s offshore swell forecast.
 async function offshoreWaves(spot, date) {
@@ -126,18 +145,34 @@ const FETCHERS = {
       link: `https://forecast.weather.gov/MapClick.php?lat=${spot.lat}&lon=${spot.lon}` };
   },
 
-  // Sky and chance of rain by hour, from the same NWS forecast as wind. The forecast
-  // starts at the current hour, so hours already past keep what an earlier load of
-  // today saved.
+  // Sky and chance of rain by hour, from the NWS gridpoint forecast that the hourly
+  // forecast is built from. Unlike the hourly forecast it starts the evening before, so
+  // hours already past have a sky too (as forecast for them, not as observed).
   async sky(spot, date, shared) {
-    const json = await shared.nwsHourly();
-    const data = { ...readCache(spot, "sky", date)?.data };
-    for (const p of json.properties.periods) {
+    const grid = (await shared.nwsGrid()).properties;
+    const cover = byHour(grid.skyCover.values, spot, date);
+    const rainPct = byHour(grid.probabilityOfPrecipitation.values, spot, date);
+    // The weather that matters most when an hour lists more than one.
+    const wx = byHour(grid.weather.values, spot, date, v => v.filter(w => w.weather)
+      .sort((a, b) => WX_RANK.indexOf(a.weather) - WX_RANK.indexOf(b.weather))[0] ?? null);
+    const data = {};
+    for (let hour = spot.firstHour; hour <= spot.lastHour; hour++) {
+      if (cover[hour] == null) continue;
+      const day = sunIsUp(zonedToMs(`${date} ${String(hour).padStart(2, "0")}:30`, spot.timeZone), spot.lat, spot.lon);
+      const w = wx[hour] && { coverage: wx[hour].coverage, weather: wx[hour].weather, intensity: wx[hour].intensity };
+      data[hour] = { text: skyText({ cover: cover[hour], wx: w, day }), rainPct: rainPct[hour] ?? 0, day };
+    }
+    // For hours the hourly forecast covers, its own words and day/night win: NWS’s cover
+    // cutoffs don’t match the textbook ones above (19% cover reads “Sunny”), so this keeps
+    // the line under the rating exactly what NWS says.
+    const hourly = await shared.nwsHourly().catch(() => null);
+    for (const p of hourly?.properties.periods ?? []) {
       const at = zonedParts(Date.parse(p.startTime), spot.timeZone);
-      if (at.date !== date) continue;
+      if (at.date !== date || !(at.hour in data)) continue;
       data[at.hour] = { text: p.shortForecast, rainPct: p.probabilityOfPrecipitation?.value ?? 0, day: p.isDaytime };
     }
-    return { data, label: "National Weather Service hourly forecast",
+    if (!Object.keys(data).length) throw new Error("No hours for today in the gridpoint forecast");
+    return { data, label: "National Weather Service forecast",
       link: `https://forecast.weather.gov/MapClick.php?lat=${spot.lat}&lon=${spot.lon}` };
   },
 
@@ -201,7 +236,7 @@ const FETCHERS = {
 const NAMES = {
   currents: "NOAA current predictions", tide: "NOAA tide predictions",
   waterTemp: "NOAA water temperature", waves: "NWS nearshore wave forecast",
-  wind: "National Weather Service hourly forecast", sky: "National Weather Service hourly forecast",
+  wind: "National Weather Service hourly forecast", sky: "National Weather Service forecast",
   windObserved: "NOAA measured wind",
   waterQuality: "SFPUC beach water quality", alerts: "National Weather Service active alerts",
 };
@@ -221,10 +256,11 @@ function writeCache(spot, key, entry) {
 export async function loadAll(spot, date) {
   const keys = Object.keys(FETCHERS);
   // Requests more than one fetcher reads, made once per load.
-  let hourly;
+  let point, hourly, grid;
+  const nwsPoint = () => point ??= getJson(`https://api.weather.gov/points/${spot.lat},${spot.lon}`);
   const shared = {
-    nwsHourly: () => hourly ??= getJson(`https://api.weather.gov/points/${spot.lat},${spot.lon}`)
-      .then(point => getJson(point.properties.forecastHourly)),
+    nwsHourly: () => hourly ??= nwsPoint().then(p => getJson(p.properties.forecastHourly)),
+    nwsGrid: () => grid ??= nwsPoint().then(p => getJson(p.properties.forecastGridData)),
   };
   const results = await Promise.all(keys.map(async key => {
     try {
