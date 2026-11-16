@@ -46,6 +46,32 @@ a { color: var(--accent-color); }
 [data-level="high"] { --chip-color: var(--high-color); --chip-soft: var(--high-soft); --chip-bar: var(--high-bar); }
 [data-level="unknown"] { --chip-color: var(--unknown-color); --chip-soft: var(--unknown-soft); --chip-bar: var(--unknown-bar); }
 
+/* Until the first load finishes, a striped bar stands in for the page: the blue fill
+   jumps forward as each source settles; the stripes keep moving right to left to show
+   it’s still working. “Loading…” in the top bar says the same in words. Later
+   refreshes say “Updating…” there and keep the page. */
+#loader { display: none; }
+main.first-load > :not(#loader) { display: none; }
+main.first-load #loader {
+  /* One stripe and one gap at 45°, measured along the bar: a seamless repeat. */
+  --stripe: 5px;
+  --stripe-repeat: calc(var(--stripe) * 2 * sqrt(2));
+  --track: var(--surface-color);
+  appearance: none; display: block; width: 100%; height: 6px; margin: 48px 0 0;
+  border: none; border-radius: 999px; overflow: hidden;
+  background-color: var(--track);
+  background-image: repeating-linear-gradient(-45deg, var(--track) 0 var(--stripe),
+    color-mix(in srgb, var(--track), var(--text-color) 9%) var(--stripe) calc(var(--stripe) * 2));
+  background-size: var(--stripe-repeat) var(--stripe-repeat);
+  color: var(--accent-fill);
+  animation: loader-stripes 350ms linear infinite; }
+/* The track is the element itself, so its stripes show through. */
+#loader::-webkit-progress-bar { background: transparent; }
+#loader::-webkit-progress-value { background: var(--accent-fill); border-radius: 999px; transition: width 200ms ease-out; }
+#loader::-moz-progress-bar { background: var(--accent-fill); border-radius: 999px; }
+@keyframes loader-stripes { to { background-position: calc(-1 * var(--stripe-repeat)) 0; } }
+@media (prefers-reduced-motion: reduce) { #loader { animation: none; } }
+
 /* The selected hour, big. */
 #hero { padding: 20px 0 16px; }
 /* Risk · time, then what’s driving the rating, in the rating’s color. The time never

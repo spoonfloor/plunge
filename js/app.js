@@ -85,10 +85,13 @@ async function refresh() {
   if (state.loading) return;
   state.loading = true;
   $("refresh").disabled = true;
-  $("updated").textContent = "Updating…";
+  if (state.lastLoad) $("updated").textContent = "Updating…"; // the first load keeps “Loading…”
   const date = zonedParts(Date.now(), spot.timeZone).date;
   try {
-    const { data, sources } = await loadAll(spot, date);
+    const { data, sources } = await loadAll(spot, date, (done, total) => {
+      $("loader").max = total;
+      $("loader").value = done;
+    });
     if (date !== state.date) state.selected = null; // a new day starts back at “now”
     state.date = date;
     state.sky = data.sky ?? {};
@@ -100,6 +103,7 @@ async function refresh() {
     renderDay(data, sources);
     renderHour();
   } finally {
+    document.querySelector("main").classList.remove("first-load");
     state.loading = false;
     $("refresh").disabled = false;
   }

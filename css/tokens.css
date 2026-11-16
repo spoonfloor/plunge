@@ -19,6 +19,7 @@
      light to read on the light page (1.95:1), so light mode darkens it to 5.6:1; dark
      mode uses it as is. Retune the 35% if the accent changes. */
   --accent-color: color-mix(in oklch, var(--config-accent), black 35%);
+  --accent-fill: var(--config-accent); /* fills, not text: the icon’s blue in both modes */
   --accent-text-color: white;
 
   --line-color: color-mix(in srgb, var(--text-color), transparent 88%);

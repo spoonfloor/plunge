@@ -253,8 +253,10 @@ function writeCache(spot, key, entry) {
 }
 
 // Resolves to { data: { currents, tide, ... }, sources: [{ key, label, link, fetchedAt, stale, error }] }.
-export async function loadAll(spot, date) {
+// onProgress(done, total), if given, is called as each source settles, loaded or not.
+export async function loadAll(spot, date, onProgress) {
   const keys = Object.keys(FETCHERS);
+  let settled = 0;
   // Requests more than one fetcher reads, made once per load.
   let point, hourly, grid;
   const nwsPoint = () => point ??= getJson(`https://api.weather.gov/points/${spot.lat},${spot.lon}`);
@@ -263,6 +265,11 @@ export async function loadAll(spot, date) {
     nwsGrid: () => grid ??= nwsPoint().then(p => getJson(p.properties.forecastGridData)),
   };
   const results = await Promise.all(keys.map(async key => {
+    const result = await loadOne(key);
+    onProgress?.(++settled, keys.length);
+    return result;
+  }));
+  async function loadOne(key) {
     try {
       const got = await FETCHERS[key](spot, date, shared);
       const entry = { date, ...got, fetchedAt: Date.now() };
@@ -273,7 +280,7 @@ export async function loadAll(spot, date) {
       return saved ? { key, ...saved, stale: true, error: err.message }
         : { key, label: NAMES[key], data: null, error: err.message };
     }
-  }));
+  }
   return {
     data: Object.fromEntries(results.map(r => [r.key, r.data])),
     sources: results.map(({ data, date: _d, ...meta }) => meta),
