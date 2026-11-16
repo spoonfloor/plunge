@@ -190,10 +190,14 @@ export function skyKind(sky) {
   return sky.day ? "sun" : "moon";
 }
 
-// “Partly sunny · 20% rain”, or “Chance light rain · 28%” when the words already say rain.
+// “Partly sunny · 20% rain”, or “Light rain · 28% chance” when rain is forecast: the
+// percentage already says how likely, so NWS’s hedge words (“Slight chance”, “likely”)
+// go. “Patchy fog” keeps “Patchy”, which is about where, not how likely.
+const HEDGES = /^(slight chance|chance|isolated|scattered|numerous|occasional|periods of) | likely$/gi;
 export function skyLine(sky) {
-  const text = `${sky.text.charAt(0)}${sky.text.slice(1).toLowerCase()}`;
-  return `${text} · ${Math.round(sky.rainPct)}%${/rain|shower|drizzle/.test(text) ? "" : " rain"}`;
+  const wet = /rain|shower|drizzle|thunder/i.test(sky.text);
+  const words = (wet ? sky.text.replace(HEDGES, "") : sky.text).toLowerCase();
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)} · ${Math.round(sky.rainPct)}% ${wet ? "chance" : "rain"}`;
 }
 
 // ---- NWS advisories ----------------------------------------------------------------

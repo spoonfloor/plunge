@@ -146,7 +146,11 @@ test("sky icon and line from the NWS short forecast", () => {
   assert.equal(skyKind({ text: "Chance Showers And Thunderstorms", day: true }), "storm");
   assert.equal(skyKind({ text: "Patchy Fog", day: true }), "fog");
   assert.equal(skyLine({ text: "Partly Sunny", rainPct: 20 }), "Partly sunny · 20% rain");
-  assert.equal(skyLine({ text: "Chance Light Rain", rainPct: 28 }), "Chance light rain · 28%");
+  assert.equal(skyLine({ text: "Chance Light Rain", rainPct: 28 }), "Light rain · 28% chance");
+  assert.equal(skyLine({ text: "Slight Chance Light Rain", rainPct: 16 }), "Light rain · 16% chance");
+  assert.equal(skyLine({ text: "Rain Likely", rainPct: 70 }), "Rain · 70% chance");
+  assert.equal(skyLine({ text: "Chance Showers And Thunderstorms", rainPct: 40 }), "Showers and thunderstorms · 40% chance");
+  assert.equal(skyLine({ text: "Patchy Fog", rainPct: 5 }), "Patchy fog · 5% rain");
 });
 
 test("sky words from NWS gridpoint weather and cover", () => {
