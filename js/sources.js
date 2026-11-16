@@ -18,6 +18,25 @@ async function getJson(url) {
 }
 const withQuery = (base, params) => `${base}?${new URLSearchParams(params)}`;
 
+// Wave height at the beach estimated from Open-Meteo’s offshore swell forecast.
+async function offshoreWaves(spot, date) {
+  const vars = ["", "secondary_", "tertiary_"].flatMap(p =>
+    [`${p}swell_wave_height`, `${p}swell_wave_period`, `${p}swell_wave_direction`]);
+  const json = await getJson(withQuery("https://marine-api.open-meteo.com/v1/marine", {
+    latitude: spot.waves.lat, longitude: spot.waves.lon, hourly: vars.join(","),
+    timezone: spot.timeZone, length_unit: "imperial", start_date: date, end_date: date,
+  }));
+  const h = json.hourly, data = {};
+  h.time.forEach((t, i) => {
+    data[Number(t.slice(11, 13))] = { swells: ["", "secondary_", "tertiary_"].map(p => ({
+      ft: h[`${p}swell_wave_height`]?.[i], periodS: h[`${p}swell_wave_period`]?.[i],
+      dirDeg: h[`${p}swell_wave_direction`]?.[i],
+    })).filter(c => c.ft != null) };
+  });
+  return { data, label: "Open-Meteo marine forecast, offshore of the Golden Gate, scaled to the beach",
+    link: "https://open-meteo.com/en/docs/marine-weather-api" };
+}
+
 // Each returns { data, link }: data in model.js’s shape, link a page a person can read.
 const FETCHERS = {
   // NOAA slack and max events from 6 PM yesterday to 6 AM tomorrow, so every hour of
@@ -75,22 +94,23 @@ const FETCHERS = {
       link: `https://www.ndbc.noaa.gov/station_page.php?station=${buoy.station}` };
   },
 
+  // Wave height at the beach from the NWS Nearshore Wave Prediction System, read
+  // through Plunge’s server function (the model’s files are too big for a phone).
+  // When that fails, an estimate from the offshore forecast stands in.
   async waves(spot, date) {
-    const vars = ["", "secondary_", "tertiary_"].flatMap(p =>
-      [`${p}swell_wave_height`, `${p}swell_wave_period`, `${p}swell_wave_direction`]);
-    const json = await getJson(withQuery("https://marine-api.open-meteo.com/v1/marine", {
-      latitude: spot.waves.lat, longitude: spot.waves.lon, hourly: vars.join(","),
-      timezone: spot.timeZone, length_unit: "imperial", start_date: date, end_date: date,
-    }));
-    const h = json.hourly, data = {};
-    h.time.forEach((t, i) => {
-      data[Number(t.slice(11, 13))] = ["", "secondary_", "tertiary_"].map(p => ({
-        ft: h[`${p}swell_wave_height`]?.[i], periodS: h[`${p}swell_wave_period`]?.[i],
-        dirDeg: h[`${p}swell_wave_direction`]?.[i],
-      })).filter(c => c.ft != null);
-    });
-    return { data, label: "Open-Meteo marine forecast, offshore of the Golden Gate",
-      link: "https://open-meteo.com/en/docs/marine-weather-api" };
+    try {
+      const json = await getJson(`${SERVER}/waves`);
+      const data = {};
+      for (const { time, ft } of json.hours) {
+        const at = zonedParts(Date.parse(time), spot.timeZone);
+        if (at.date === date) data[at.hour] = { beachFt: ft };
+      }
+      if (!Object.keys(data).length) throw new Error("No hours for today in the latest run");
+      return { data, label: `NWS Nearshore Wave Prediction System, run of ${json.run}`,
+        link: "https://polar.ncep.noaa.gov/nwps/viewer.shtml" };
+    } catch {
+      return await offshoreWaves(spot, date);
+    }
   },
 
   async wind(spot, date) {

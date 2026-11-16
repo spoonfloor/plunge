@@ -37,11 +37,15 @@ test("swell outside the Gate’s window doesn’t reach the beach", () => {
   assert.ok(Math.abs(transferFactor(10, 242.5, spot.waves) - transferFactor(10, 275, spot.waves) / 2) < 1e-9);
 });
 
-test("wave levels from estimated beach height", () => {
-  assert.equal(assessWaves([{ ft: 8, periodS: 11, dirDeg: 280 }], spot).level, "low");     // 0.88 ft
-  assert.equal(assessWaves([{ ft: 12, periodS: 17, dirDeg: 275 }], spot).level, "caution"); // 2.76 ft
-  assert.equal(assessWaves([{ ft: 16, periodS: 18, dirDeg: 275 }], spot).level, "high");    // 4.0 ft
-  assert.equal(assessWaves([], spot).level, "unknown");
+test("wave levels from the nearshore model, or estimated from offshore swell", () => {
+  assert.equal(assessWaves({ beachFt: 1.9 }, spot).level, "low");
+  assert.equal(assessWaves({ beachFt: 2.1 }, spot).level, "caution");
+  assert.equal(assessWaves({ beachFt: 3 }, spot).level, "high");
+  assert.equal(assessWaves({ swells: [{ ft: 8, periodS: 11, dirDeg: 280 }] }, spot).level, "low");     // 0.88 ft
+  assert.equal(assessWaves({ swells: [{ ft: 12, periodS: 17, dirDeg: 275 }] }, spot).level, "caution"); // 2.76 ft
+  assert.equal(assessWaves({ swells: [{ ft: 16, periodS: 18, dirDeg: 275 }] }, spot).level, "high");    // 4.0 ft
+  assert.equal(assessWaves({ swells: [] }, spot).level, "unknown");
+  assert.equal(assessWaves(undefined, spot).level, "unknown");
 });
 
 test("overall: worst factor, two cautions make high, missing criticals make no rating", () => {

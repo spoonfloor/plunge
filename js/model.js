@@ -80,14 +80,21 @@ export function transferFactor(periodS, dirDeg, waves) {
   return byPeriod * byDir;
 }
 
-// components: [{ ft, periodS, dirDeg }], offshore swells for one hour.
-export function assessWaves(components, spot) {
-  const swells = (components ?? []).filter(c => c.ft > 0 && c.periodS > 0 && c.dirDeg != null);
-  if (!swells.length) return unknown("No swell forecast for this hour.");
-  const parts = swells.map(c => ({ ...c, share: transferFactor(c.periodS, c.dirDeg, spot.waves) }))
-    .sort((x, y) => y.ft * y.share - x.ft * x.share);
+// Estimated wave height at the beach from offshore swells ([{ ft, periodS, dirDeg }]),
+// each scaled by how much of it gets through the Gate. The fallback when the NWS
+// nearshore model isn’t available.
+export function beachWaveFt(swells, spot) {
+  const parts = (swells ?? []).filter(c => c.ft > 0 && c.periodS > 0 && c.dirDeg != null);
+  if (!parts.length) return null;
   // Heights of separate swells combine as the root of the summed squares (their energy adds).
-  const beach = Math.hypot(...parts.map(c => c.ft * c.share));
+  return Math.hypot(...parts.map(c => c.ft * transferFactor(c.periodS, c.dirDeg, spot.waves)));
+}
+
+// waves: one hour, either { beachFt } from the NWS nearshore model or { swells } from
+// the offshore forecast.
+export function assessWaves(waves, spot) {
+  const beach = waves?.beachFt ?? beachWaveFt(waves?.swells, spot);
+  if (beach == null) return unknown("No wave forecast for this hour.");
   const { caution, high } = spot.thresholds.beachWaveFt;
   const level = beach >= high ? "high" : beach >= caution ? "caution" : "low";
   return { level, value: `${fmt(beach)} ft`, notes: [] };
@@ -181,7 +188,7 @@ export function advisoryParagraphs(description) {
 export function assessHour(hour, startMs, data, spot) {
   const factors = {
     current: data.currents ? assessCurrent(data.currents, startMs, spot, data.tide?.[hour]) : unknown("Current predictions didn’t load."),
-    waves: data.waves ? assessWaves(data.waves[hour], spot) : unknown("Swell forecast didn’t load."),
+    waves: data.waves ? assessWaves(data.waves[hour], spot) : unknown("Wave forecast didn’t load."),
     // Measured where the hour has passed, forecast otherwise.
     wind: assessWind(data.windObserved?.[hour] ?? data.wind?.[hour], spot),
     waterTemp: assessWaterTemp(data.waterTemp, spot),

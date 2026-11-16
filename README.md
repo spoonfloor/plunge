@@ -11,7 +11,7 @@ What knocks a chest-deep wader off their feet is moving water, so **current** an
 | Factor | Source | How it’s turned into a level |
 |---|---|---|
 | Current | NOAA predictions, Fort Point 0.5 nmi E (PCT0286) | Interpolated between slack and max, peak within the hour, scaled to the beach, then depth × speed against the 0.6 m²/s adult stability limit |
-| Waves | Open-Meteo marine forecast, offshore of the Gate | Each swell scaled by how well its period and direction get through the Gate. Caution at 2 ft, where the crest reaches a chest-deep wader’s mouth; high at 3 ft, about where waves break at chest depth |
+| Waves | NWS Nearshore Wave Prediction System (SWAN, ~1 km grid around the Bay), through the server function; Open-Meteo offshore forecast, scaled to the beach, when that’s unavailable | Height at the beach. Caution at 2 ft, where the crest reaches a chest-deep wader’s mouth; high at 3 ft, about where waves break at chest depth |
 | Wind | NOAA measured (past hours), NWS forecast (later hours) | Sustained speed. Direction is shown as onshore, offshore or along the shore, from the way the beach faces |
 | Water quality | SFPUC beach monitoring, Crissy Field Beach East (4612) | Posted for bacteria or a sewer overflow makes every hour High |
 | Water temperature | NOAA, San Francisco (9414290); SF Bar buoy (46237) through the server function while that station is down | Under 50°F is a caution |
@@ -19,7 +19,7 @@ What knocks a chest-deep wader off their feet is moving water, so **current** an
 
 NWS advisories for the point that bear on being in the water (surf, coastal flooding, wind, marine warnings) appear below the factors, with “None” when there are none. They don’t feed the rating.
 
-The beach scaling for current and waves is a starting guess (`js/spots/crissy-east.js`), not yet tuned against real sessions.
+The beach scaling for current, and for waves when the nearshore model is unavailable, is a starting guess (`js/spots/crissy-east.js`), not yet tuned against real sessions.
 
 ## What’s where
 
