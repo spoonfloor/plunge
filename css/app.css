@@ -16,7 +16,7 @@ body { overscroll-behavior: none; }
    Dynamic Island and home indicator wherever the page draws under them
    (viewport-fit=cover; in landscape, for example). */
 main { box-sizing: border-box; max-width: 640px; margin: 0 auto;
-  padding: calc(env(safe-area-inset-top) + var(--top-bar-height) + var(--day-dots-height) + 8px) 0
+  padding: calc(env(safe-area-inset-top) + var(--top-bar-height) + var(--day-dots-height)) 0
            calc(env(safe-area-inset-bottom) + 32px); }
 
 /* The app’s top bar. Keep it fixed, full width, opaque and over 10px tall: iOS then
@@ -29,20 +29,23 @@ main { box-sizing: border-box; max-width: 640px; margin: 0 auto;
   padding: env(safe-area-inset-top) max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
   display: flex; flex-direction: column; background: var(--page-color); }
 
-#top-bar { border-bottom: 1px solid var(--line-color); }
+/* No line under the bar: the day segments close it off. */
 #top-bar .top-row { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   height: var(--top-bar-height); }
 #top-bar h1 { margin: 0; font-size: 17px; font-weight: 600; }
 
-/* One dot per day, under the title: the day shown is solid, today a ring (when it’s not
-   the one shown). Tap one to go there; swiping the page is the main way. */
-#days { display: flex; justify-content: center; height: var(--day-dots-height); margin-top: -6px; }
-#days button { display: grid; place-items: center; width: 22px; height: 100%; padding: 0; border: 0;
+/* One line per day under the title, all the same length: the day shown is solid, today
+   the accent blue (when it’s not the one shown). Tap one to go there; swiping the page
+   is the main way. The row sits midway between the title and the Risk line: 16px from
+   the title’s baseline to the row, 12 to the bar, 12 on to the row’s end, 12 of hero
+   padding and 4 to the Risk line’s capitals. 28px either side. */
+#days { display: flex; justify-content: center; align-items: center; gap: 4px; height: var(--day-dots-height); }
+#days button { display: grid; place-items: center; height: 100%; padding: 0 1px; border: 0;
   background: none; cursor: pointer; }
-#days .dot { width: 7px; height: 7px; box-sizing: border-box; border-radius: 50%;
-  background: color-mix(in srgb, var(--text-color), transparent 75%); transition: background-color 150ms; }
-#days .today .dot { background: none; border: 1.5px solid color-mix(in srgb, var(--text-color), transparent 45%); }
-#days [aria-current="true"] .dot { background: var(--text-color); border: 0; }
+#days .dot { width: 26px; height: 3px; border-radius: 2px;
+  background: color-mix(in srgb, var(--text-color), transparent 78%); transition: background-color 150ms; }
+#days .today .dot { background: var(--accent-fill); }
+#days [aria-current="true"] .dot { background: var(--text-color); }
 #days button:focus-visible { outline: none; }
 #days button:focus-visible .dot { box-shadow: 0 0 0 2px var(--page-color), 0 0 0 4px var(--accent-color); }
 
@@ -104,7 +107,7 @@ main.first-load #loader {
 @media (prefers-reduced-motion: reduce) { #loader { animation: none; } }
 
 /* The selected hour, big. */
-.hero { padding: 20px 0 16px; }
+.hero { padding: 12px 0 16px; }
 /* Risk · time, then what’s driving the rating, in the rating’s color. The time never
    splits; on a narrow screen the marks wrap instead. */
 .hero-when { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 2px; }
