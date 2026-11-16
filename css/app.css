@@ -57,7 +57,10 @@ main.first-load #loader {
   --stripe: 5px;
   --stripe-repeat: calc(var(--stripe) * 2 * sqrt(2));
   --track: var(--surface-color);
-  appearance: none; display: block; width: 100%; height: 6px; margin: 48px 0 0;
+  /* In the middle of the screen, the content’s width: the page’s 640px, less its gutters. */
+  position: fixed; top: 50%; left: 0; right: 0; transform: translateY(-50%);
+  width: min(608px, 100vw - 2 * max(16px, env(safe-area-inset-left), env(safe-area-inset-right)));
+  appearance: none; display: block; height: 6px; margin: 0 auto;
   border: none; border-radius: 999px; overflow: hidden;
   background-color: var(--track);
   background-image: repeating-linear-gradient(-45deg, var(--track) 0 var(--stripe),
