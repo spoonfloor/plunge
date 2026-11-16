@@ -45,3 +45,8 @@ export function hourLabel(hour) {
   const h = hour % 12 || 12;
   return `${h} ${hour < 12 ? "AM" : "PM"}`;
 }
+
+// An instant as a wall-clock time in timeZone: “1:40 PM”.
+export function clockTime(ms, timeZone) {
+  return new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" }).format(ms);
+}

@@ -3,13 +3,13 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 
 import spot from "./spots/crissy-east.js";
 import { loadAll } from "./sources.js";
-import { assessHour, summarizeDay } from "./model.js";
+import { advisoryParagraphs, advisorySummary, assessHour, summarizeDay, waterAdvisories } from "./model.js";
 import { hourLabel, zonedParts, zonedToMs } from "./time.js";
 
 const LABELS = { low: "Low", caution: "Caution", high: "High", unknown: "No rating" };
 const FACTORS = [
   ["current", "Current"], ["waves", "Waves"], ["wind", "Wind"],
-  ["waterQuality", "Water quality"], ["waterTemp", "Water temperature"], ["tide", "Tide"],
+  ["waterQuality", "Water quality"], ["waterTemp", "Water temperature"],
 ];
 const REFRESH_AFTER_MS = 15 * 60e3;
 
@@ -69,16 +69,34 @@ function renderDay(data, sources) {
 
   $("summary").textContent = summarizeDay(state.hours);
 
+  renderAdvisories(data.alerts);
+}
+
+// NWS advisories in force at some point in today’s window, water-relevant ones only.
+// A heads-up below the factors; they don’t change the rating.
+function renderAdvisories(alerts) {
   const dayStart = zonedToMs(`${state.date} ${spot.firstHour}:00`, spot.timeZone);
   const dayEnd = zonedToMs(`${state.date} ${spot.lastHour + 1}:00`, spot.timeZone);
-  const alerts = (data.alerts ?? []).filter(a => a.onsetMs < dayEnd && (!a.endsMs || a.endsMs > dayStart));
-  $("alerts-more").hidden = !alerts.length;
-  $("alerts-title").textContent = alerts.length === 1 ? `NWS ${alerts[0].event}` : `${alerts.length} NWS alerts`;
-  $("alerts").replaceChildren(...alerts.map(a => el("div", { class: "alert" },
-    alerts.length > 1 ? el("p", {}, el("strong", {}, a.event)) : null,
-    el("p", {}, `${a.endsMs ? `Until ${dayAndHour(a.endsMs)}. ` : ""}Covers ${a.areas}.`),
-    el("p", {}, "A regional warning, shown for comparison. The ratings above are for this beach."))));
+  const today = waterAdvisories(alerts).filter(a => a.onsetMs < dayEnd && (!a.endsMs || a.endsMs > dayStart));
+  const name = el("p", { class: "name" }, el("span", {}, "NWS advisories"),
+    today.length ? el("span", {}, `${today.length} active`) : null);
+  if (!alerts) {
+    $("advisories").replaceChildren(name, el("p", { class: "value" }, "Unavailable"),
+      el("p", { class: "note" }, "NWS advisories didn’t load."));
+  } else if (!today.length) {
+    $("advisories").replaceChildren(name, el("p", { class: "value" }, "None"));
+  } else {
+    $("advisories").replaceChildren(name, el("details", {},
+      el("summary", {}, advisorySummary(today)),
+      today.map(a => el("div", { class: "advisory" },
+        el("p", { class: "advisory-name" }, sentenceCase(a.event)),
+        a.endsMs ? el("p", { class: "advisory-when" }, `Until ${dayAndHour(a.endsMs)}`) : null,
+        advisoryParagraphs(a.description).map(p => el("p", { class: "note" }, p))))));
+  }
 }
+
+// “Coastal Flood Advisory” → “Coastal flood advisory”
+const sentenceCase = s => s.charAt(0) + s.slice(1).toLowerCase();
 
 // Hero, strip selection and factor cards for the selected hour.
 function renderHour() {
@@ -108,10 +126,10 @@ function renderHour() {
   $("factors").replaceChildren(...FACTORS.map(([key, name]) => {
     const f = r.factors[key];
     const rated = f.level in LABELS && f.level !== "unknown";
-    return el("li", { "data-level": f.level },
+    return el("li", { class: "factor", "data-level": f.level },
       el("p", { class: "name" }, el("span", {}, name), rated ? el("span", { class: "rating" }, LABELS[f.level]) : null),
-      el("p", { class: "value" }, f.value.replace(/ at the beach$/, "")),
-      el("p", { class: "why" }, f.why));
+      el("p", { class: "value" }, f.value),
+      f.notes.map(n => el("p", { class: "note" }, n)));
   }));
 }
 

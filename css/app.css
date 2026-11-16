@@ -44,7 +44,7 @@ a { color: var(--accent-color); }
 [data-level="low"] { --chip-color: var(--low-color); --chip-soft: var(--low-soft); --chip-bar: var(--low-bar); }
 [data-level="caution"] { --chip-color: var(--caution-color); --chip-soft: var(--caution-soft); --chip-bar: var(--caution-bar); }
 [data-level="high"] { --chip-color: var(--high-color); --chip-soft: var(--high-soft); --chip-bar: var(--high-bar); }
-[data-level="unknown"], [data-level="info"] { --chip-color: var(--unknown-color); --chip-soft: var(--unknown-soft); --chip-bar: var(--unknown-bar); }
+[data-level="unknown"] { --chip-color: var(--unknown-color); --chip-soft: var(--unknown-soft); --chip-bar: var(--unknown-bar); }
 
 /* The selected hour, big. */
 #hero { padding: 20px 0 16px; }
@@ -68,26 +68,29 @@ a { color: var(--accent-color); }
 
 #summary { margin: 0 0 20px; padding: 14px 16px; font-size: 17px; line-height: 1.45; }
 
-/* Factor cards for the selected hour. */
+/* Factor cards for the selected hour, then the day’s NWS advisories in the same style. */
 #factors { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-#factors li { background: var(--surface-color); border-radius: var(--radius); padding: 14px 16px; }
-#factors .name { display: flex; justify-content: space-between; gap: 8px; margin: 0;
+.factor { background: var(--surface-color); border-radius: var(--radius); padding: 14px 16px; }
+.factor .name { display: flex; justify-content: space-between; gap: 8px; margin: 0;
   font-size: 15px; font-weight: 600; color: var(--text-muted); }
-#factors .rating { color: var(--chip-color); }
-#factors .value { margin: 2px 0 6px; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums;
+.factor .rating { color: var(--chip-color); }
+.factor .value { margin: 2px 0 0; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em; }
-#factors .why { margin: 0; font-size: 15px; line-height: 1.45; color: var(--text-muted); }
+.factor .value + .note { margin-top: 6px; }
+.factor .note { margin: 0; font-size: 15px; line-height: 1.45; color: var(--text-muted); }
 
-/* Collapsed extras at the bottom. */
-.more { margin-top: 12px; border-top: 1px solid var(--line-color); font-size: 15px; line-height: 1.45; }
-.more:first-of-type { margin-top: 28px; }
-.more summary { padding: 14px 0; font-size: 17px; font-weight: 600; cursor: pointer; list-style: none;
-  display: flex; justify-content: space-between; }
-.more summary::-webkit-details-marker { display: none; }
-.more summary::after { content: "+"; color: var(--text-muted); font-weight: 400; }
-.more[open] summary::after { content: "–"; }
-.more p { margin: 0 0 10px; color: var(--text-muted); }
-.alert p { margin: 0 0 8px; }
+#advisories { margin-top: 10px; }
+#advisories summary { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  margin-top: 2px; font-size: 20px; font-weight: 600; line-height: 1.3; cursor: pointer; list-style: none; }
+#advisories summary::-webkit-details-marker { display: none; }
+/* Chevron: down when closed, up when open. */
+#advisories summary::after { content: ""; flex: none; width: 8px; height: 8px; margin: 0 4px 4px 0;
+  border: solid var(--text-muted); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+#advisories details[open] summary::after { margin: 4px 4px 0 0; transform: rotate(-135deg); }
+.advisory { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-color); }
+.advisory .note + .note { margin-top: 8px; }
+.advisory-name { margin: 0; font-size: 17px; font-weight: 600; }
+.advisory-when { margin: 0 0 6px; font-size: 15px; color: var(--text-muted); }
 
 /* Tappable controls: no double-tap zoom delay, no long-press callout or text selection. */
 button { touch-action: manipulation; -webkit-touch-callout: none;

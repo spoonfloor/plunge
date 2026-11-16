@@ -1,6 +1,6 @@
 // The risk model. Pure functions: data in, hourly assessment out. No fetching, no DOM.
 
-import { hourLabel } from "./time.js";
+import { clockTime, hourLabel, zonedParts } from "./time.js";
 
 const KNOT_MS = 0.514444;
 const G = 9.81;
@@ -35,21 +35,34 @@ export function peakCurrent(events, startMs) {
   return peak;
 }
 
-export function assessCurrent(events, startMs, spot) {
+// The next slack (the current turning) at or after ms, or null past the events we have.
+export function nextSlack(events, ms) {
+  return events.find(e => e.ms >= ms && e.knots === 0)?.ms ?? null;
+}
+
+// The tide’s height (feet above MLLW) rides along here: the current is what it does
+// to a wader, so the two share a card.
+export function assessCurrent(events, startMs, spot, tideFt = null) {
   const channel = peakCurrent(events, startMs);
   if (channel === null) return unknown("No current prediction covers this hour.");
   const beach = Math.abs(channel) * spot.current.nearshoreFactor;
+  // Depth × speed at chest depth, against the depth where adults lose their footing.
   const dv = spot.standingDepthM * beach * KNOT_MS;
   const { caution, high } = spot.thresholds.currentDV;
   const level = dv >= high ? "high" : dv >= caution ? "caution" : "low";
   const way = Math.abs(channel) < 0.05 ? "Near slack"
-    : channel < 0 ? "Ebb, flowing west toward the Gate," : "Flood, flowing east toward the Marina,";
+    : channel < 0 ? "Ebb, pulling west toward the Gate" : "Flood, pushing east toward the Marina";
+  const slack = nextSlack(events, startMs);
+  const slackDay = slack !== null && zonedParts(slack, spot.timeZone).date !== zonedParts(startMs, spot.timeZone).date
+    ? " tomorrow" : "";
   return {
     level,
-    value: `${fmt(beach)} kn at the beach`,
-    why: `${way} peaking at ${fmt(Math.abs(channel))} kn in the channel this hour; about ` +
-      `${fmt(beach)} kn at the beach (estimated at ${pct(spot.current.nearshoreFactor)}). ` +
-      `Chest deep, depth × speed is ${fmt(dv, 2)} m²/s; adults lose their footing around ${high}.`,
+    value: `${fmt(beach)} kn`,
+    notes: [
+      way,
+      slack !== null ? `Slack at ${clockTime(slack, spot.timeZone)}${slackDay}` : null,
+      tideFt != null ? `Water level ${fmt(tideFt)} ft` : null,
+    ].filter(Boolean),
   };
 }
 
@@ -77,56 +90,88 @@ export function assessWaves(components, spot) {
   const beach = Math.hypot(...parts.map(c => c.ft * c.share));
   const { caution, high } = spot.thresholds.beachWaveFt;
   const level = beach >= high ? "high" : beach >= caution ? "caution" : "low";
-  const main = parts[0];
-  return {
-    level,
-    value: `${fmt(beach)} ft at the beach`,
-    why: `Main swell offshore: ${fmt(main.ft)} ft at ${Math.round(main.periodS)} s from ` +
-      `${Math.round(main.dirDeg)}° (${compass(main.dirDeg)}). About ${pct(main.share)} of it reaches ` +
-      `the beach (estimated)${parts.length > 1 ? `, plus ${parts.length - 1} smaller swell${parts.length > 2 ? "s" : ""}` : ""}.`,
-  };
+  return { level, value: `${fmt(beach)} ft`, notes: [] };
 }
 
-// ---- Wind, water temperature, tide ------------------------------------------------
+// ---- Wind and water temperature ----------------------------------------------------
+
+// Which way a wind from fromDir (compass point, such as "SSW") pushes a wader, against
+// the way the beach faces: out, in, or along the shore. Null when there’s no direction.
+export function windPush(fromDir, shoreFacingDeg) {
+  const i = COMPASS.indexOf(fromDir);
+  if (i < 0) return null;
+  // Angle between where the wind comes from and the open water: 0 means it blows in.
+  const off = Math.abs(((i * 22.5 - shoreFacingDeg) % 360 + 540) % 360 - 180);
+  if (off <= 45) return "Onshore, pushing you in";
+  if (off >= 135) return "Offshore, pushing you out";
+  const toward = (i * 22.5 + 180) % 360;
+  return `Along the shore, pushing you ${CARDINAL[Math.round(toward / 90) % 4]}`;
+}
 
 export function assessWind(wind, spot) {
   if (!wind) return unknown("No wind measurement or forecast for this hour.");
   const { caution, high } = spot.thresholds.windMph;
   const level = wind.mph >= high ? "high" : wind.mph >= caution ? "caution" : "low";
-  return { level, value: `${wind.mph} mph ${wind.dir}`, why: `${wind.observed ? "Measured" : "Forecast"}: sustained ${wind.dir} wind, ${wind.mph} mph.` };
+  return { level, value: `${wind.mph} mph`, notes: [windPush(wind.dir, spot.shoreFacingDeg)].filter(Boolean) };
 }
 
 export function assessWaterTemp(temp, spot) {
   if (!temp) return unknown("No recent water temperature reading.");
   const level = temp.f < spot.thresholds.waterTempF.caution ? "caution" : "low";
-  return {
-    level, value: `${Math.round(temp.f)}°F`,
-    why: `Measured ${Math.round(temp.f)}°F${temp.where ? ` at ${temp.where}` : ""}. ${level === "caution"
-      ? "Cold enough that the gasp reflex on entry is a hazard by itself."
-      : temp.f < 60 ? "Cold, so enter slowly." : "Mild for San Francisco."}`,
-  };
+  return { level, value: `${Math.round(temp.f)}°F`, notes: [] };
 }
 
 // quality: { status: "clean" | "posted" | "unsampled", sampled: "2026-11-09" | null }
 export function assessWaterQuality(quality) {
   if (!quality) return unknown("SFPUC water quality didn’t load.");
-  const when = quality.sampled ? `Last sampled ${shortDate(quality.sampled)}` : "No recent sample";
+  const when = quality.sampled ? `Sampled ${shortDate(quality.sampled)}` : "No recent sample";
   if (quality.status === "posted") {
-    return { level: "high", value: "Posted",
-      why: `SFPUC has posted this beach: bacteria were high in the last 24 hours, or sewage recently overflowed here. Don’t go in. ${when}.` };
+    return { level: "high", value: "Posted", notes: ["High bacteria or a sewer overflow. Don’t go in.", when] };
   }
   if (quality.status === "unsampled") return unknown(`SFPUC isn’t sampling this beach right now. ${when}.`);
-  return { level: "low", value: "Meets standards",
-    why: `${when}. Bacteria meet California standards for water contact. SFPUC samples weekly.` };
+  return { level: "low", value: "Meets standards", notes: [when] };
 }
 
-export function assessTide(ft, nextFt) {
-  if (ft == null) return unknown("No tide prediction for this hour.", "info");
-  const trend = nextFt == null ? "" : nextFt > ft + 0.05 ? ", rising" : nextFt < ft - 0.05 ? ", falling" : ", turning";
-  return {
-    level: "info", value: `${fmt(ft)} ft${trend}`,
-    why: "Height above mean lower low water. Higher water puts chest depth closer to shore.",
-  };
+// ---- NWS advisories ----------------------------------------------------------------
+
+// The NWS events that bear on being in the water, each with a short name for the card’s
+// one-line summary. Everything else at this point (heat, frost, air quality) is left out.
+const ADVISORY_TOPICS = [
+  [/coastal flood/i, "flooding"],
+  [/high surf/i, "high surf"],
+  [/rip current/i, "rip currents"],
+  [/beach hazards/i, "beach hazards"],
+  [/tsunami/i, "tsunami"],
+  [/^storm (warning|watch)$|hurricane force wind/i, "storm-force winds"],
+  [/gale/i, "gale"],
+  [/high wind|extreme wind|wind advisory/i, "high winds"],
+  [/hazardous seas/i, "hazardous seas"],
+  [/small craft/i, "small craft"],
+  [/special marine/i, "marine warning"],
+];
+
+// alerts: [{ event, ... }] as normalized by sources.js → the water-relevant ones, each
+// with its topic added.
+export function waterAdvisories(alerts) {
+  return (alerts ?? []).flatMap(a => {
+    const topic = ADVISORY_TOPICS.find(([re]) => re.test(a.event))?.[1];
+    return topic ? [{ ...a, topic }] : [];
+  });
+}
+
+// “Flooding, high surf, high winds”
+export function advisorySummary(advisories) {
+  const s = [...new Set(advisories.map(a => a.topic))].join(", ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// An NWS description, hard-wrapped with “* WHAT...” bullets, as plain paragraphs:
+// “What: Breaking waves of 18 to 24 ft.”
+export function advisoryParagraphs(description) {
+  return (description ?? "").split(/\n\s*\n/)
+    .map(p => p.replace(/\s*\n\s*/g, " ").trim()
+      .replace(/^\*\s*([A-Z][A-Z ]*?)\.\.\.\s*/, (_, label) => `${label.charAt(0)}${label.slice(1).toLowerCase()}: `))
+    .filter(Boolean);
 }
 
 // ---- One hour, all factors ---------------------------------------------------------
@@ -135,13 +180,12 @@ export function assessTide(ft, nextFt) {
 // (each may be null when its source failed).
 export function assessHour(hour, startMs, data, spot) {
   const factors = {
-    current: data.currents ? assessCurrent(data.currents, startMs, spot) : unknown("Current predictions didn’t load."),
+    current: data.currents ? assessCurrent(data.currents, startMs, spot, data.tide?.[hour]) : unknown("Current predictions didn’t load."),
     waves: data.waves ? assessWaves(data.waves[hour], spot) : unknown("Swell forecast didn’t load."),
     // Measured where the hour has passed, forecast otherwise.
     wind: assessWind(data.windObserved?.[hour] ?? data.wind?.[hour], spot),
     waterTemp: assessWaterTemp(data.waterTemp, spot),
     waterQuality: assessWaterQuality(data.waterQuality),
-    tide: data.tide ? assessTide(data.tide[hour], data.tide[hour + 1]) : unknown("Tide predictions didn’t load.", "info"),
   };
   return { hour, startMs, factors, overall: overall(factors) };
 }
@@ -213,13 +257,10 @@ function shortDate(date) {
   return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" }).format(Date.UTC(y, m - 1, d));
 }
 
-function unknown(why, level = "unknown") { return { level, value: "Unavailable", why }; }
+function unknown(note) { return { level: "unknown", value: "Unavailable", notes: [note] }; }
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 const fmt = (x, digits = 1) => x.toFixed(digits);
-const pct = x => `${Math.round(x * 100)}%`;
 const list = xs => xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`;
 
-export function compass(deg) {
-  const points = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
-  return points[Math.round((((deg % 360) + 360) % 360) / 22.5) % 16];
-}
+const COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+const CARDINAL = ["north", "east", "south", "west"];

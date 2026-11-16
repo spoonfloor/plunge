@@ -150,11 +150,12 @@ const FETCHERS = {
     };
   },
 
-  // The blanket warnings, shown for comparison. They don’t feed the rating.
+  // NWS warnings and advisories for the point. Shown below the factors; they don’t
+  // feed the rating.
   async alerts(spot) {
     const json = await getJson(`https://api.weather.gov/alerts/active?point=${spot.lat},${spot.lon}`);
     const data = json.features.map(({ properties: p }) => ({
-      event: p.event, headline: p.headline, areas: p.areaDesc,
+      event: p.event, headline: p.headline, areas: p.areaDesc, description: p.description,
       onsetMs: Date.parse(p.onset ?? p.effective), endsMs: Date.parse(p.ends ?? p.expires),
     }));
     return { data, label: "National Weather Service active alerts",

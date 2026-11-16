@@ -17,6 +17,10 @@ export default {
   // How deep the wader stands, in meters. Chest deep, feet on the sand.
   standingDepthM: 1.3,
 
+  // The way the beach faces, in degrees: from the sand out to open water. Sets which
+  // winds push a wader out, in, or along the shore.
+  shoreFacingDeg: 0,
+
   current: {
     // NOAA subordinate station, about 1.5 km west in the channel. It only publishes
     // slack and max times, so hourly speeds are interpolated between them.
