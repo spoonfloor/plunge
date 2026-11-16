@@ -50,8 +50,11 @@ export default {
     // Depth × velocity (m²/s) at standing depth. 0.6 is the common limit for adult
     // stability in flowing water (Australian Rainfall and Runoff, 2019).
     currentDV: { caution: 0.4, high: 0.6 },
-    // Estimated wave height at the beach, feet. Uncalibrated.
-    beachWaveFt: { caution: 1, high: 2 },
+    // Estimated wave height at the beach, trough to crest, feet. At chest depth (1.3 m),
+    // a 2 ft wave’s crest reaches the mouth, so breathing takes timing. Waves break at
+    // about 0.78 × depth, roughly 3.3 ft here, and a wave breaking on a wader is what
+    // knocks them down; 3 ft rounds that down.
+    beachWaveFt: { caution: 2, high: 3 },
     // Sustained wind, mph.
     windMph: { caution: 15, high: 25 },
     // Water temperature, °F. Below this, cold shock is a hazard on its own.

@@ -39,7 +39,8 @@ test("swell outside the Gate’s window doesn’t reach the beach", () => {
 
 test("wave levels from estimated beach height", () => {
   assert.equal(assessWaves([{ ft: 8, periodS: 11, dirDeg: 280 }], spot).level, "low");     // 0.88 ft
-  assert.equal(assessWaves([{ ft: 12, periodS: 17, dirDeg: 275 }], spot).level, "high");   // 2.76 ft
+  assert.equal(assessWaves([{ ft: 12, periodS: 17, dirDeg: 275 }], spot).level, "caution"); // 2.76 ft
+  assert.equal(assessWaves([{ ft: 16, periodS: 18, dirDeg: 275 }], spot).level, "high");    // 4.0 ft
   assert.equal(assessWaves([], spot).level, "unknown");
 });
 
