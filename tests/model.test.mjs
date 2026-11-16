@@ -88,16 +88,20 @@ test("a posted beach is High every hour, even without current or wave data", () 
   assert.equal(assessWaterQuality(null).level, "unknown");
 });
 
-test("current card: direction, next slack and water level", () => {
-  const start = zonedToMs("2026-11-15 13:00", spot.timeZone);
+test("current card: direction, next two slacks and water level", () => {
+  const z = t => zonedToMs(t, spot.timeZone);
+  const start = z("2026-11-15 13:00");
   const ev = [{ ms: start - 2 * H, knots: -2 }, { ms: start + 40 * 60e3, knots: 0 }, { ms: start + 3 * H, knots: 1.5 }];
   const c = assessCurrent(ev, start, spot, 4.43);
   assert.equal(c.value, "0.4 kn"); // 0.77 kn in the channel at 1 PM, half of it at the beach
+  // One slack left in the events: just that one. No tide leaves the water line out.
   assert.deepEqual(c.notes, ["Ebb, pulling west toward the Gate", "Slack at 1:40 PM", "Water level 4.4 ft"]);
-  // A slack past midnight says so; no tide leaves the line out.
-  const late = zonedToMs("2026-11-15 17:00", spot.timeZone);
-  const ev2 = [{ ms: late - H, knots: 1 }, { ms: zonedToMs("2026-11-16 00:30", spot.timeZone), knots: 0 }];
-  assert.deepEqual(assessCurrent(ev2, late, spot).notes, ["Flood, pushing east toward the Marina", "Slack at 12:30 AM tomorrow"]);
+  const notes = (slacks, at = start) =>
+    assessCurrent([{ ms: at - H, knots: 1 }, ...slacks.map(t => ({ ms: z(t), knots: 0 }))], at, spot).notes[1];
+  assert.equal(notes(["2026-11-15 13:40", "2026-11-15 19:52", "2026-11-16 01:14"]), "Slack at 1:40 PM and 7:52 PM");
+  assert.equal(notes(["2026-11-15 22:24", "2026-11-16 01:14"]), "Slack at 10:24 PM and tomorrow at 1:14 AM");
+  assert.equal(notes(["2026-11-16 01:14", "2026-11-16 05:40"]), "Slack tomorrow at 1:14 AM and 5:40 AM");
+  assert.equal(notes(["2026-11-16 00:30"], z("2026-11-15 17:00")), "Slack tomorrow at 12:30 AM");
 });
 
 test("wind says which way it pushes a wader on a north-facing beach", () => {

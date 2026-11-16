@@ -35,9 +35,21 @@ export function peakCurrent(events, startMs) {
   return peak;
 }
 
-// The next slack (the current turning) at or after ms, or null past the events we have.
-export function nextSlack(events, ms) {
-  return events.find(e => e.ms >= ms && e.knots === 0)?.ms ?? null;
+// The next slacks (the current turning) at or after ms, up to count of them: fewer, or
+// none, past the events we have.
+export function nextSlacks(events, ms, count = 2) {
+  return events.filter(e => e.ms >= ms && e.knots === 0).slice(0, count).map(e => e.ms);
+}
+
+// “Slack at 10:24 AM and tomorrow at 1:14 AM”. A day word shared by every slack comes
+// once, up front: “Slack tomorrow at 1:14 AM and 7:40 AM”.
+function slackLine(slacks, startMs, timeZone) {
+  const today = zonedParts(startMs, timeZone).date;
+  const day = ms => zonedParts(ms, timeZone).date === today ? "" : "tomorrow ";
+  const clock = ms => clockTime(ms, timeZone);
+  return new Set(slacks.map(day)).size === 1
+    ? `Slack ${day(slacks[0])}at ${slacks.map(clock).join(" and ")}`
+    : `Slack ${slacks.map(ms => `${day(ms)}at ${clock(ms)}`).join(" and ")}`;
 }
 
 // Current thresholds as speed at the beach (knots, to the tenth shown on the card):
@@ -65,16 +77,14 @@ export function assessCurrent(events, startMs, spot, tideFt = null) {
   const level = levelFor(beach, currentKnots(spot));
   const way = Math.abs(channel) < 0.05 ? "Near slack"
     : channel < 0 ? "Ebb, pulling west toward the Gate" : "Flood, pushing east toward the Marina";
-  const slack = nextSlack(events, startMs);
-  const slackDay = slack !== null && zonedParts(slack, spot.timeZone).date !== zonedParts(startMs, spot.timeZone).date
-    ? " tomorrow" : "";
+  const slacks = nextSlacks(events, startMs);
   return {
     level,
     amount: beach,
     value: `${fmt(beach)} kn`,
     notes: [
       way,
-      slack !== null ? `Slack at ${clockTime(slack, spot.timeZone)}${slackDay}` : null,
+      slacks.length ? slackLine(slacks, startMs, spot.timeZone) : null,
       tideFt != null ? `Water level ${fmt(tideFt)} ft` : null,
     ].filter(Boolean),
   };
