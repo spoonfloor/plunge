@@ -88,7 +88,7 @@ const skyIcon = sky => svg("svg", { class: "sky-icon", viewBox: "0 0 24 24", "ar
 // date: the day shown. selected: the hour picked, or null for “now” (on other days,
 // the hour it is now). Both carry across days, so swiping compares the same hour.
 const state = { today: null, dates: [], days: {}, alerts: null, date: null, selected: null,
-  open: new Set(), advisoriesOpen: false, lastLoad: 0, loading: false };
+  open: new Set(), rainOpen: false, advisoriesOpen: false, lastLoad: 0, loading: false };
 
 async function refresh() {
   if (state.loading) return;
@@ -194,6 +194,9 @@ function dayPanel(date, side) {
   const selected = selectedHour();
   const r = hours.find(h => h.hour === selected);
   const marks = driverMarks(r);
+  const rain = rainPcts(sky, hours);
+  const hasRain = rain.some(p => p != null);
+  const skyBits = sky[selected] ? [skyIcon(sky[selected]), el("span", {}, skyLine(sky[selected]))] : [];
 
   const hero = el("section", { class: "hero", "data-level": r.overall.level },
     el("p", { class: "hero-when eyebrow" },
@@ -201,7 +204,13 @@ function dayPanel(date, side) {
       marks.length ? el("span", { class: "drivers", role: "img",
         "aria-label": `because of ${r.overall.drivers.map(k => FACTORS.find(f => f.key === k)?.name.toLowerCase()).join(" and ")}` }, marks) : null),
     el("p", { class: "level-word" }, LABELS[r.overall.level]),
-    el("p", { class: "hero-sky" }, sky[selected] ? [skyIcon(sky[selected]), el("span", {}, skyLine(sky[selected]))] : []));
+    // The sky line opens the day’s chance of rain, when the forecast has it.
+    el("p", { class: "hero-sky" }, hasRain
+      ? el("button", { type: "button", class: "rain-toggle", "aria-expanded": String(state.rainOpen) },
+        skyBits, el("span", { class: "visually-hidden" }, "Chance of rain through the day"),
+        el("span", { class: "chevron", "aria-hidden": "true" }))
+      : skyBits));
+  hero.querySelector(".rain-toggle")?.addEventListener("click", toggleRain);
 
   const skyRow = el("div", { class: "sky-row", "aria-hidden": "true", style: `--hours: ${hours.length}` },
     hours.map(h => el("span", { class: isPast(date, h.hour) ? "past" : null }, sky[h.hour] ? skyIcon(sky[h.hour]) : null)));
@@ -252,7 +261,9 @@ function dayPanel(date, side) {
     }));
 
   return el("section", { class: "day", "aria-label": longDate(date), inert: side !== 0, "aria-hidden": side !== 0 ? "true" : null },
-    hero, skyRow, strip,
+    hero, skyRow,
+    state.rainOpen && hasRain ? el("div", { class: "rain" }, rainCurve(rain, hours, selected)) : null,
+    strip,
     el("p", { class: "summary card" }, summarizeDay(hours)),
     factors,
     advisories(date));
@@ -328,6 +339,112 @@ function dayCurve(key, selected, hours) {
     nearEnd ? null : labelAt(si, hourLabel(selected), "middle"),
     labelAt(points.length - 1, hourLabel(points.at(-1).hour), "end"));
 }
+
+// ---- Chance of rain through the day ---------------------------------------------------
+
+// Each hour’s chance of rain, or null where the hour only has a station report.
+const rainPcts = (sky, hours) => hours.map(h => sky[h.hour] && !sky[h.hour].observed ? sky[h.hour].rainPct : null);
+
+// A day’s content width, so the rain line can put each point under its hour to the pixel.
+function contentWidth() {
+  const day = $("track").children[1];
+  if (!day) return 343;
+  const style = getComputedStyle(day);
+  return day.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+}
+// The width of a guide’s number. Its digits are tabular, all as wide as a 0, which a
+// canvas can’t set, so it measures that many 0s instead.
+const measure = document.createElement("canvas").getContext("2d");
+function labelWidth(text) {
+  measure.font = `600 12px ${getComputedStyle(document.body).fontFamily}`;
+  return measure.measureText("0".repeat(text.length)).width;
+}
+
+// The day’s chance of rain, drawn like the factor curves: a line through the hours and a
+// dot at the selected one, with dashed lines at 0, 50 and 100% and their numbers at the
+// right end. Each point sits under its hour’s sky icon; the line breaks over hours with
+// no chance of rain.
+function rainCurve(pcts, hours, selected) {
+  const W = contentWidth(), H = 72, top = 8, bottom = 64;
+  const GAP = 3; // the sky row’s and hour strip’s column gap, in app.css
+  const col = (W - GAP * (hours.length - 1)) / hours.length;
+  const x = i => i * (col + GAP) + col / 2;
+  const y = pct => bottom - (pct / 100) * (bottom - top);
+
+  const runs = [];
+  pcts.forEach((p, i) => {
+    if (p == null) return;
+    if (i === 0 || pcts[i - 1] == null) runs.push([]);
+    runs.at(-1).push({ i, at: `${x(i).toFixed(1)},${y(p).toFixed(1)}` });
+  });
+  const si = hours.findIndex(h => h.hour === selected);
+
+  return svg("svg", { class: "rain-curve", viewBox: `0 0 ${W} ${H}`, role: "img",
+    "aria-label": `Chance of rain through the day: ${hours.map((h, i) => pcts[i] == null ? null : `${hourLabel(h.hour)} ${Math.round(pcts[i])}%`).filter(Boolean).join(", ")}` },
+    [0, 50, 100].map(v => svg("g", { class: "guide" },
+      svg("line", { x1: 0, x2: (W - labelWidth(String(v)) - 6).toFixed(1), y1: y(v), y2: y(v) }),
+      svg("text", { x: W, y: y(v), "text-anchor": "end", "dominant-baseline": "middle" }, String(v)))),
+    runs.map(r => r.length > 1 ? svg("polyline", { points: r.map(p => p.at).join(" "), class: "trace", pathLength: 1,
+      "data-from": r[0].i, "data-to": r.at(-1).i }) : null),
+    pcts[si] != null ? svg("circle", { cx: x(si), cy: y(pcts[si]), r: 5, class: "dot", "data-i": si }) : null);
+}
+
+// Tapping the sky line. Every render builds the page afresh, so the graph is always
+// built already open or already gone: the motion runs here, on the tap, never on a
+// render. Picking an hour or changing days shows it as it stands.
+let folding = false;
+async function toggleRain(e) {
+  if (folding) return;
+  const refocus = e.currentTarget === document.activeElement;
+  const graph = () => $("track").children[1]?.querySelector(".rain");
+  if (state.rainOpen) {
+    folding = true;
+    if (!reduceMotion()) await fold(graph());
+    folding = false;
+    state.rainOpen = false;
+    render();
+  } else {
+    state.rainOpen = true;
+    render();
+    if (!reduceMotion()) unfold(graph());
+  }
+  if (refocus) $("track").children[1]?.querySelector(".rain-toggle")?.focus();
+}
+
+const EASE = "cubic-bezier(.2,.8,.2,1)";
+// The space opens; the guides fade in; the line draws left to right, and the dot pops in
+// as the line reaches it.
+function unfold(graph) {
+  const h = graph.offsetHeight, n = state.days[state.date].hours.length - 1;
+  const DRAW = 420, START = 120;
+  graph.animate([{ height: "0px" }, { height: `${h}px` }], { duration: 300, easing: EASE });
+  graph.querySelectorAll(".guide").forEach(g => g.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, delay: 60, fill: "backwards" }));
+  graph.querySelectorAll(".trace").forEach(t => {
+    const from = +t.dataset.from / n, to = +t.dataset.to / n;
+    t.animate([{ strokeDasharray: "0 1" }, { strokeDasharray: "1 0" }],
+      { duration: DRAW * (to - from), delay: START + DRAW * from, easing: "linear", fill: "backwards" });
+  });
+  graph.querySelector(".dot")?.animate([{ transform: "scale(0)" }, { transform: "scale(1.25)", offset: 0.7 }, { transform: "scale(1)" }],
+    { duration: 220, delay: START + DRAW * (+graph.querySelector(".dot").dataset.i / n), easing: "ease-out", fill: "backwards" });
+}
+
+// The reverse, quicker: the dot and guides go, the line pulls back left, the space closes.
+async function fold(graph) {
+  if (!graph) return;
+  const all = [
+    ...[...graph.querySelectorAll(".guide")].map(g => g.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, fill: "forwards" })),
+    ...[...graph.querySelectorAll(".trace")].map(t => t.animate([{ strokeDasharray: "1 0" }, { strokeDasharray: "0 1" }], { duration: 160, easing: "ease-in", fill: "forwards" })),
+    graph.querySelector(".dot")?.animate([{ transform: "scale(1)" }, { transform: "scale(0)" }], { duration: 100, fill: "forwards" }),
+  ].filter(Boolean);
+  // As with swipes, a browser that stops drawing frames can’t hold the tap up.
+  const settle = (animations, ms) => Promise.race([Promise.all(animations.map(a => a.finished)).catch(() => {}),
+    new Promise(done => setTimeout(done, ms + 150))]);
+  await settle(all, 160);
+  await settle([graph.animate([{ height: `${graph.offsetHeight}px` }, { height: "0px" }], { duration: 180, easing: EASE, fill: "forwards" })], 180);
+}
+
+// A wider or narrower screen moves the hours, so the line is drawn again to match.
+addEventListener("resize", () => { if (state.rainOpen && state.dates.length) render(); });
 
 // ---- Moving between days ------------------------------------------------------------------
 
