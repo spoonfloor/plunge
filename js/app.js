@@ -384,63 +384,17 @@ function rainCurve(pcts, hours, selected) {
     [0, 50, 100].map(v => svg("g", { class: "guide" },
       svg("line", { x1: 0, x2: (W - labelWidth(String(v)) - 6).toFixed(1), y1: y(v), y2: y(v) }),
       svg("text", { x: W, y: y(v), "text-anchor": "end", "dominant-baseline": "middle" }, String(v)))),
-    runs.map(r => r.length > 1 ? svg("polyline", { points: r.map(p => p.at).join(" "), class: "trace", pathLength: 1,
-      "data-from": r[0].i, "data-to": r.at(-1).i }) : null),
-    pcts[si] != null ? svg("circle", { cx: x(si), cy: y(pcts[si]), r: 5, class: "dot", "data-i": si }) : null);
+    runs.map(r => r.length > 1 ? svg("polyline", { points: r.map(p => p.at).join(" "), class: "trace" }) : null),
+    pcts[si] != null ? svg("circle", { cx: x(si), cy: y(pcts[si]), r: 5, class: "dot" }) : null);
 }
 
-// Tapping the sky line. Every render builds the page afresh, so the graph is always
-// built already open or already gone: the motion runs here, on the tap, never on a
-// render. Picking an hour or changing days shows it as it stands.
-let folding = false;
-async function toggleRain(e) {
-  if (folding) return;
+// Tapping the sky line opens or closes the graph at once, like the factor curves. The
+// page is built afresh, so focus goes back to the new sky line.
+function toggleRain(e) {
   const refocus = e.currentTarget === document.activeElement;
-  const graph = () => $("track").children[1]?.querySelector(".rain");
-  if (state.rainOpen) {
-    folding = true;
-    if (!reduceMotion()) await fold(graph());
-    folding = false;
-    state.rainOpen = false;
-    render();
-  } else {
-    state.rainOpen = true;
-    render();
-    if (!reduceMotion()) unfold(graph());
-  }
+  state.rainOpen = !state.rainOpen;
+  render();
   if (refocus) $("track").children[1]?.querySelector(".rain-toggle")?.focus();
-}
-
-const EASE = "cubic-bezier(.2,.8,.2,1)";
-// The space opens; the guides fade in; the line draws left to right, and the dot pops in
-// as the line reaches it.
-function unfold(graph) {
-  const h = graph.offsetHeight, n = state.days[state.date].hours.length - 1;
-  const DRAW = 420, START = 120;
-  graph.animate([{ height: "0px" }, { height: `${h}px` }], { duration: 300, easing: EASE });
-  graph.querySelectorAll(".guide").forEach(g => g.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, delay: 60, fill: "backwards" }));
-  graph.querySelectorAll(".trace").forEach(t => {
-    const from = +t.dataset.from / n, to = +t.dataset.to / n;
-    t.animate([{ strokeDasharray: "0 1" }, { strokeDasharray: "1 0" }],
-      { duration: DRAW * (to - from), delay: START + DRAW * from, easing: "linear", fill: "backwards" });
-  });
-  graph.querySelector(".dot")?.animate([{ transform: "scale(0)" }, { transform: "scale(1.25)", offset: 0.7 }, { transform: "scale(1)" }],
-    { duration: 220, delay: START + DRAW * (+graph.querySelector(".dot").dataset.i / n), easing: "ease-out", fill: "backwards" });
-}
-
-// The reverse, quicker: the dot and guides go, the line pulls back left, the space closes.
-async function fold(graph) {
-  if (!graph) return;
-  const all = [
-    ...[...graph.querySelectorAll(".guide")].map(g => g.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, fill: "forwards" })),
-    ...[...graph.querySelectorAll(".trace")].map(t => t.animate([{ strokeDasharray: "1 0" }, { strokeDasharray: "0 1" }], { duration: 160, easing: "ease-in", fill: "forwards" })),
-    graph.querySelector(".dot")?.animate([{ transform: "scale(1)" }, { transform: "scale(0)" }], { duration: 100, fill: "forwards" }),
-  ].filter(Boolean);
-  // As with swipes, a browser that stops drawing frames can’t hold the tap up.
-  const settle = (animations, ms) => Promise.race([Promise.all(animations.map(a => a.finished)).catch(() => {}),
-    new Promise(done => setTimeout(done, ms + 150))]);
-  await settle(all, 160);
-  await settle([graph.animate([{ height: `${graph.offsetHeight}px` }, { height: "0px" }], { duration: 180, easing: EASE, fill: "forwards" })], 180);
 }
 
 // A wider or narrower screen moves the hours, so the line is drawn again to match.

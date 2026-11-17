@@ -130,13 +130,11 @@ main.first-load #loader {
 
 /* The day’s chance of rain, between the sky icons and the hours. Styled like the
    factor curves; the guides take the muted text color, since rain isn’t rated. */
-.rain { overflow: hidden; }
 .rain-curve { display: block; width: 100%; height: auto; padding: 2px 0 8px; overflow: visible; }
 .rain-curve .guide line { stroke: var(--text-muted); stroke-width: 1.5; stroke-dasharray: 4 4; }
 .rain-curve .guide text { fill: var(--text-muted); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .rain-curve .trace { fill: none; stroke: var(--text-muted); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.rain-curve .dot { fill: var(--accent-fill); stroke: var(--page-color); stroke-width: 2;
-  transform-box: fill-box; transform-origin: center; }
+.rain-curve .dot { fill: var(--accent-fill); stroke: var(--page-color); stroke-width: 2; }
 
 /* Sky icons: outline, in the text color. Clouds are filled with the surface behind them
    so a sun or moon behind a cloud is hidden. */
