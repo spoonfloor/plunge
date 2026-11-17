@@ -67,6 +67,56 @@ async function offshoreWaves(spot, dates) {
 }
 
 // Each returns { data, link }: data in model.js’s shape, link a page a person can read.
+// The latest water temperature. The Presidio station sits inside the Bay, closest to
+// the beach. When it has no recent reading, fall back to the SF Bar buoy outside the
+// Gate, read through Plunge’s server function (NDBC doesn’t allow browsers to read it
+// directly).
+async function latestWaterTemp(spot) {
+  const { station, stationName } = spot.waterTemp;
+  const fresh = ms => Date.now() - ms < 24 * 3600e3;
+  let presidioError;
+  try {
+    const json = await getJson(withQuery(COOPS, {
+      ...COOPS_COMMON, product: "water_temperature", station, date: "latest",
+    }));
+    const reading = json.data?.[0];
+    const ms = reading && zonedToMs(reading.t, spot.timeZone);
+    if (reading && fresh(ms)) {
+      return { data: { f: Number(reading.v), ms, where: stationName }, label: `NOAA water temperature, ${stationName} (${station})`,
+        link: `https://tidesandcurrents.noaa.gov/stationhome.html?id=${station}` };
+    }
+    presidioError = "no reading in the last 24 hours";
+  } catch (err) { presidioError = err.message; }
+
+  const buoy = await getJson(`${SERVER}/water-temp`);
+  const ms = Date.parse(buoy.observedAt);
+  if (!fresh(ms)) throw new Error("No reading in the last 24 hours");
+  return { data: { f: buoy.fahrenheit, ms, where: `${buoy.name} buoy, outside the Gate` },
+    label: `NDBC water temperature, ${buoy.name} buoy (${buoy.station}), standing in for ${stationName} (${presidioError})`,
+    link: `https://www.ndbc.noaa.gov/station_page.php?station=${buoy.station}` };
+}
+
+// A past day’s water temperature by hour, into hours: the Presidio station’s hourly
+// readings, with the buoy’s (from the server) for any hour Presidio missed. Says
+// whether it found any.
+async function pastWaterTemp(spot, date, shared, hours) {
+  const { station, stationName } = spot.waterTemp;
+  try {
+    const json = await getJson(withQuery(COOPS, { ...COOPS_COMMON, product: "water_temperature", station,
+      interval: "h", begin_date: compact(date), end_date: compact(date) }));
+    for (const { t, v } of json.data ?? []) {
+      const { hour } = localParts(t);
+      if (v !== "") hours[hour] = { f: Number(v), ms: zonedToMs(t, spot.timeZone), where: stationName };
+    }
+  } catch { /* the buoy fills in below */ }
+  try {
+    for (const [hour, r] of Object.entries((await shared.history(date)).waterTemp ?? {})) {
+      hours[hour] ??= { f: r.f, ms: r.ms, where: "San Francisco Bar buoy, outside the Gate" };
+    }
+  } catch { /* hours with no reading stay empty */ }
+  return Object.keys(hours).length > 0;
+}
+
 const FETCHERS = {
   // NOAA slack and max events from 6 PM the evening before the first day to 6 AM after
   // the last, so every hour shown sits between two of them. One list, not by day.
@@ -98,47 +148,43 @@ const FETCHERS = {
       link: `https://tidesandcurrents.noaa.gov/stationhome.html?id=${station}` };
   },
 
-  // The Presidio station sits inside the Bay, closest to the beach. When it has no
-  // recent reading, fall back to the SF Bar buoy outside the Gate, read through
-  // Plunge’s server function (NDBC doesn’t allow browsers to read it directly).
-  async waterTemp(spot) {
-    const { station, stationName } = spot.waterTemp;
-    const fresh = ms => Date.now() - ms < 24 * 3600e3;
-    let presidioError;
-    try {
-      const json = await getJson(withQuery(COOPS, {
-        ...COOPS_COMMON, product: "water_temperature", station, date: "latest",
-      }));
-      const reading = json.data?.[0];
-      const ms = reading && zonedToMs(reading.t, spot.timeZone);
-      if (reading && fresh(ms)) {
-        return { data: { f: Number(reading.v), ms, where: stationName }, label: `NOAA water temperature, ${stationName} (${station})`,
-          link: `https://tidesandcurrents.noaa.gov/stationhome.html?id=${station}` };
-      }
-      presidioError = "no reading in the last 24 hours";
-    } catch (err) { presidioError = err.message; }
-
-    const buoy = await getJson(`${SERVER}/water-temp`);
-    const ms = Date.parse(buoy.observedAt);
-    if (!fresh(ms)) throw new Error("No reading in the last 24 hours");
-    return { data: { f: buoy.fahrenheit, ms, where: `${buoy.name} buoy, outside the Gate` },
-      label: `NDBC water temperature, ${buoy.name} buoy (${buoy.station}), standing in for ${stationName} (${presidioError})`,
-      link: `https://www.ndbc.noaa.gov/station_page.php?station=${buoy.station}` };
+  // By day and hour. Past days get each hour’s own reading; today and the days ahead
+  // get the latest reading, since there’s no forecast for water temperature.
+  async waterTemp(spot, dates, shared) {
+    const today = zonedParts(Date.now(), spot.timeZone).date;
+    const data = byDay(dates);
+    const past = dates.filter(d => d < today);
+    let latest = null, latestError = null;
+    try { latest = await latestWaterTemp(spot); } catch (err) { latestError = err; }
+    for (const date of dates) {
+      if (date < today || !latest) continue;
+      for (let hour = spot.firstHour; hour <= spot.lastHour; hour++) data[date][hour] = latest.data;
+    }
+    const pastFound = (await Promise.all(past.map(date => pastWaterTemp(spot, date, shared, data[date])))).some(Boolean);
+    if (!latest && !pastFound) throw latestError;
+    return latest ? { ...latest, data } : { data, label: "NOAA water temperature, past days only" };
   },
 
   // Wave height at the beach from the NWS Nearshore Wave Prediction System, read
   // through Plunge’s server function (the model’s files are too big for a phone).
-  // Its latest run starts this morning and reaches about six days out, so for hours
-  // it doesn’t cover (yesterday, the tail of the last day) or when it fails, an
-  // estimate from the offshore forecast stands in.
-  async waves(spot, dates) {
+  // Its latest run starts this morning and reaches about six days out. For past days,
+  // the server’s record of each hour from the run current at the time. For hours
+  // neither covers (the tail of the last day) or when both fail, an estimate from the
+  // offshore forecast stands in.
+  async waves(spot, dates, shared) {
+    const today = zonedParts(Date.now(), spot.timeZone).date;
     const data = byDay(dates);
     let run = null;
+    await Promise.all(dates.filter(d => d < today).map(async date => {
+      try {
+        for (const [hour, ft] of Object.entries((await shared.history(date)).waves)) data[date][hour] = { beachFt: ft };
+      } catch { /* no record; the run or the offshore estimate covers it below */ }
+    }));
     try {
       const json = await getJson(`${SERVER}/waves`);
       for (const { time, ft } of json.hours) {
         const at = zonedParts(Date.parse(time), spot.timeZone);
-        if (data[at.date]) data[at.date][at.hour] = { beachFt: ft };
+        if (data[at.date] && !data[at.date][at.hour]) data[at.date][at.hour] = { beachFt: ft };
       }
       run = json.run;
     } catch { /* the offshore estimate covers every hour below */ }
@@ -244,8 +290,12 @@ const FETCHERS = {
 
   // SFPUC beach postings, the feed behind https://webapps.sfpuc.org/sapps/beachesandbay.html.
   // XML wrapping a JSON array of stations. A posting is today’s and only today’s: SFPUC
-  // doesn’t forecast, and the feed keeps no history.
-  async waterQuality(spot, dates) {
+  // doesn’t forecast, and the feed keeps no history, so past days come from the
+  // server’s record.
+  async waterQuality(spot, dates, shared) {
+    const today = zonedParts(Date.now(), spot.timeZone).date;
+    const recorded = Object.fromEntries(await Promise.all(dates.filter(d => d < today).map(async date =>
+      [date, await shared.history(date).then(h => h.waterQuality, () => null) ?? { status: "unrecorded" }])));
     const res = await fetch("https://infrastructure.sfwater.org/lims.asmx/getBeaches");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const xml = await res.text();
@@ -264,10 +314,9 @@ const FETCHERS = {
         : "clean",
       sampled: m ? `20${String(y).padStart(2, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null,
     };
-    const today = zonedParts(Date.now(), spot.timeZone).date;
     return {
       data: Object.fromEntries(dates.map(date => [date,
-        date === today ? reading : { status: date < today ? "unrecorded" : "unforecast" }])),
+        date === today ? reading : recorded[date] ?? { status: "unforecast" }])),
       label: `SFPUC beach water quality, ${spot.waterQuality.stationName}`,
       link: "https://webapps.sfpuc.org/sapps/beachesandbay.html",
     };
@@ -295,7 +344,7 @@ const NAMES = {
   waterQuality: "SFPUC beach water quality", alerts: "National Weather Service active alerts",
 };
 // Sources that come back by day. The rest are one reading or list for every day.
-const BY_DAY = ["tide", "waves", "wind", "windObserved", "sky", "skyObserved", "waterQuality"];
+const BY_DAY = ["tide", "waves", "wind", "windObserved", "sky", "skyObserved", "waterTemp", "waterQuality"];
 
 // One day out of loadAll’s data, in the shape model.js’s assessHour takes. A source
 // that loaded but has nothing for the day gives an empty day, not null, so the card
@@ -324,9 +373,12 @@ export async function loadAll(spot, dates, onProgress) {
   // Requests more than one fetcher reads, made once per load.
   let point, hourly, grid;
   const nwsPoint = () => point ??= getJson(`https://api.weather.gov/points/${spot.lat},${spot.lon}`);
+  const history = {};
   const shared = {
     nwsHourly: () => hourly ??= nwsPoint().then(p => getJson(p.properties.forecastHourly)),
     nwsGrid: () => grid ??= nwsPoint().then(p => getJson(p.properties.forecastGridData)),
+    // What the server recorded for a past day (see server/functions/plunge).
+    history: date => history[date] ??= getJson(withQuery(`${SERVER}/history`, { date })),
   };
   const results = await Promise.all(keys.map(async key => {
     const result = await loadOne(key);

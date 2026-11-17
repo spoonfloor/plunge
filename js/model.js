@@ -145,7 +145,7 @@ export function assessWind(wind, spot) {
 }
 
 export function assessWaterTemp(temp, spot) {
-  if (!temp) return unknown("No recent water temperature reading.");
+  if (!temp) return unknown("No water temperature reading for this hour.");
   const level = temp.f < spot.thresholds.waterTempF.caution ? "caution" : "low";
   return { level, value: `${Math.round(temp.f)}°F`, notes: [] };
 }
@@ -265,7 +265,7 @@ export function advisoryParagraphs(description) {
 
 // ---- One hour, all factors ---------------------------------------------------------
 
-// data: { currents, tide, waves, wind, waterTemp } as normalized by sources.js
+// data: one day of { currents, tide, waves, wind, waterTemp, waterQuality } as normalized by sources.js
 // (each may be null when its source failed).
 export function assessHour(hour, startMs, data, spot) {
   const factors = {
@@ -273,7 +273,7 @@ export function assessHour(hour, startMs, data, spot) {
     waves: data.waves ? assessWaves(data.waves[hour], spot) : unknown("Wave forecast didn’t load."),
     // Measured where the hour has passed, forecast otherwise.
     wind: assessWind(data.windObserved?.[hour] ?? data.wind?.[hour], spot),
-    waterTemp: assessWaterTemp(data.waterTemp, spot),
+    waterTemp: data.waterTemp ? assessWaterTemp(data.waterTemp[hour], spot) : unknown("Water temperature didn’t load."),
     waterQuality: assessWaterQuality(data.waterQuality),
   };
   return { hour, startMs, factors, overall: overall(factors) };

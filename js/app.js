@@ -232,9 +232,8 @@ function dayPanel(date, side) {
       return button;
     }));
 
-  // Water temperature is a latest reading, not a forecast: every day shows today’s, and
-  // says so.
-  const latestOnly = date !== state.today && {
+  // Water temperature is a reading, not a forecast: days ahead show today’s, and say so.
+  const latestOnly = date > state.today && {
     waterTemp: "Today’s reading. There’s no forecast for water temperature.",
   };
   const factors = el("ul", { class: "factors", "aria-label": "Factors for the selected hour" },
