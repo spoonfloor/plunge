@@ -115,6 +115,7 @@ main.first-load #loader {
 .hero-when .drivers { display: flex; align-items: center; gap: 6px; color: var(--chip-color); }
 .driver-icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8;
   stroke-linecap: round; stroke-linejoin: round; }
+.driver-icon .dots { stroke-width: 2.4; }
 .driver-temp { font-variant-numeric: tabular-nums; }
 .level-word { margin: 2px 0 4px; font-size: 56px; line-height: 1.05; font-weight: 700;
   letter-spacing: -0.02em; color: var(--chip-color, var(--text-color)); }

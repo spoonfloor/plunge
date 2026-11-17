@@ -243,8 +243,9 @@ const FETCHERS = {
   },
 
   // SFPUC beach postings, the feed behind https://webapps.sfpuc.org/sapps/beachesandbay.html.
-  // XML wrapping a JSON array of stations.
-  async waterQuality(spot) {
+  // XML wrapping a JSON array of stations. A posting is today’s and only today’s: SFPUC
+  // doesn’t forecast, and the feed keeps no history.
+  async waterQuality(spot, dates) {
     const res = await fetch("https://infrastructure.sfwater.org/lims.asmx/getBeaches");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const xml = await res.text();
@@ -255,15 +256,18 @@ const FETCHERS = {
     const station = JSON.parse(decoded).find(x => x.stationid === spot.waterQuality.station);
     if (!station) throw new Error(`Station ${spot.waterQuality.station} not in the feed`);
     const [m, d, y] = (station.sample_date ?? "").split("/").map(Number);
+    const reading = {
+      // Same rules as the SFPUC page: a red status, a posted sign or a sewer
+      // discharge means posted; yellow or white means not sampled.
+      status: station.s_color === "R" || station.cso || (station.posted && ["R", "G"].includes(station.p_color)) ? "posted"
+        : station.s_color === "Y" || station.s_color === "W" ? "unsampled"
+        : "clean",
+      sampled: m ? `20${String(y).padStart(2, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null,
+    };
+    const today = zonedParts(Date.now(), spot.timeZone).date;
     return {
-      data: {
-        // Same rules as the SFPUC page: a red status, a posted sign or a sewer
-        // discharge means posted; yellow or white means not sampled.
-        status: station.s_color === "R" || station.cso || (station.posted && ["R", "G"].includes(station.p_color)) ? "posted"
-          : station.s_color === "Y" || station.s_color === "W" ? "unsampled"
-          : "clean",
-        sampled: m ? `20${String(y).padStart(2, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null,
-      },
+      data: Object.fromEntries(dates.map(date => [date,
+        date === today ? reading : { status: date < today ? "unrecorded" : "unforecast" }])),
       label: `SFPUC beach water quality, ${spot.waterQuality.stationName}`,
       link: "https://webapps.sfpuc.org/sapps/beachesandbay.html",
     };
@@ -291,7 +295,7 @@ const NAMES = {
   waterQuality: "SFPUC beach water quality", alerts: "National Weather Service active alerts",
 };
 // Sources that come back by day. The rest are one reading or list for every day.
-const BY_DAY = ["tide", "waves", "wind", "windObserved", "sky", "skyObserved"];
+const BY_DAY = ["tide", "waves", "wind", "windObserved", "sky", "skyObserved", "waterQuality"];
 
 // One day out of loadAll’s data, in the shape model.js’s assessHour takes. A source
 // that loaded but has nothing for the day gives an empty day, not null, so the card

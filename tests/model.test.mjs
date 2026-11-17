@@ -80,13 +80,31 @@ test("day summary groups hours by rating and reason", () => {
 test("a posted beach is High every hour, even without current or wave data", () => {
   const posted = assessWaterQuality({ status: "posted", sampled: "2026-11-09" });
   assert.equal(posted.level, "high");
+  assert.equal(posted.value, "Hazardous");
   const f = { current: { level: "unknown" }, waves: { level: "low" }, wind: { level: "low" },
     waterTemp: { level: "low" }, waterQuality: posted };
   assert.deepEqual(overall(f), { level: "high", drivers: ["waterQuality"], why: "SFPUC has posted this beach for bacteria or a sewer overflow. Don’t go in." });
+  // Other factors at caution or worse still show as reasons.
+  assert.deepEqual(overall({ ...f, current: { level: "caution" }, wind: { level: "high" } }).drivers, ["waterQuality", "current", "wind"]);
+  assert.equal(assessWaterQuality({ status: "clean", sampled: "2026-11-09" }).value, "OK");
   assert.equal(assessWaterQuality({ status: "clean", sampled: "2026-11-09" }).level, "low");
   assert.deepEqual(assessWaterQuality({ status: "clean", sampled: "2026-11-09" }).notes, ["Sampled Nov 9"]);
   assert.equal(assessWaterQuality({ status: "unsampled", sampled: null }).level, "unknown");
   assert.equal(assessWaterQuality(null).level, "unknown");
+  for (const status of ["unforecast", "unrecorded", undefined]) {
+    const q = assessWaterQuality({ status });
+    assert.equal(q.level, "unknown");
+    assert.equal(q.value, "Unavailable");
+  }
+});
+
+test("a posting counts for today only", () => {
+  const day = (status, date) => forDate({ waterQuality: { [date]: { status } } }, date);
+  assert.equal(day("posted", "2026-11-17").waterQuality.status, "posted");
+  assert.deepEqual(forDate({ waterQuality: { "2026-11-17": { status: "posted" } } }, "2026-11-18").waterQuality, {});
+  const f = { current: { level: "low" }, waves: { level: "low" }, wind: { level: "low" }, waterTemp: { level: "low" },
+    waterQuality: assessWaterQuality({ status: "unforecast" }) };
+  assert.equal(overall(f).level, "low");
 });
 
 test("current card: direction, next two slacks and water level", () => {

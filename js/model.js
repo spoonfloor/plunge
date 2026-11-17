@@ -150,15 +150,20 @@ export function assessWaterTemp(temp, spot) {
   return { level, value: `${Math.round(temp.f)}°F`, notes: [] };
 }
 
-// quality: { status: "clean" | "posted" | "unsampled", sampled: "2026-11-09" | null }
+// quality: the day’s posting, { status, sampled: "2026-11-09" | null }. status is
+// "clean", "posted" or "unsampled" for a reading; "unrecorded" for a past day with no
+// record of its posting; "unforecast" for a day ahead, which SFPUC doesn’t forecast.
 export function assessWaterQuality(quality) {
   if (!quality) return unknown("SFPUC water quality didn’t load.");
   const when = quality.sampled ? `Sampled ${shortDate(quality.sampled)}` : "No recent sample";
-  if (quality.status === "posted") {
-    return { level: "high", value: "Posted", notes: ["High bacteria or a sewer overflow. Don’t go in.", when] };
+  switch (quality.status) {
+    case "posted": return { level: "high", value: "Hazardous", notes: ["High bacteria or a sewer overflow. Don’t go in.", when] };
+    case "clean": return { level: "low", value: "OK", notes: [when] };
+    case "unsampled": return unknown(`SFPUC isn’t sampling this beach right now. ${when}.`);
+    case "unforecast": return unknown("SFPUC doesn’t forecast water quality.");
+    case "unrecorded": return unknown("No record of this day’s posting.");
+    default: return unknown("No water quality for this day.");
   }
-  if (quality.status === "unsampled") return unknown(`SFPUC isn’t sampling this beach right now. ${when}.`);
-  return { level: "low", value: "Meets standards", notes: [when] };
 }
 
 // ---- Sky ---------------------------------------------------------------------------
@@ -279,9 +284,12 @@ const NAMES = { current: "current", waves: "waves", wind: "wind", waterTemp: "wa
 const CRITICAL = ["current", "waves"];
 
 export function overall(factors) {
-  // A posted beach is a no-go whatever the water is doing.
+  // A posted beach is a no-go whatever the water is doing. Anything else at caution or
+  // worse is still named, so the reasons don’t vanish behind the posting.
   if (factors.waterQuality?.level === "high") {
-    return { level: "high", drivers: ["waterQuality"], why: "SFPUC has posted this beach for bacteria or a sewer overflow. Don’t go in." };
+    const also = Object.keys(NAMES).filter(k => k !== "waterQuality" && RANK[factors[k]?.level] >= RANK.caution);
+    return { level: "high", drivers: ["waterQuality", ...also],
+      why: "SFPUC has posted this beach for bacteria or a sewer overflow. Don’t go in." };
   }
   const missing = CRITICAL.filter(k => factors[k].level === "unknown");
   if (missing.length) {

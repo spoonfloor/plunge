@@ -67,9 +67,11 @@ const SKY_ICONS = {
   fog: () => [svg("path", { d: "M4 8h16M3 12h18M5 16h14M8 20h8" })],
 };
 // What’s driving the selected hour’s rating, after the time on the Risk line: icons for
-// current, waves and wind, the reading itself for water temperature. Water quality has
-// none: a posted beach is High all day and the summary says why.
+// current, waves, wind and water quality (a drop with specks in it), the reading itself
+// for water temperature.
 const DRIVER_ICONS = {
+  waterQuality: () => [svg("path", { d: "M12 3c-3.3 4.2-6.2 7.6-6.2 11a6.2 6.2 0 0 0 12.4 0C18.2 10.6 15.3 7.2 12 3z" }),
+    svg("path", { d: "M11 11v.01M14.4 13.6v.01M10.8 16v.01", class: "dots" })],
   current: () => [svg("path", { d: "M3 9c2.5-2 5-2 7.5 0s5 2 7.5 0 3-1.5 3-1.5M3 15c2.5-2 5-2 7.5 0s5 2 7.5 0 3-1.5 3-1.5" })],
   waves: () => [svg("path", { d: "M2.5 16c2 0 3-1 4.5-3.5S10 7 13 7c2.5 0 3.5 2 3 3.5-1.5-1-3-.3-3 1.3 0 2.2 2.5 4.2 6 4.2h2.5" }),
     svg("path", { d: "M2.5 20c2.5 0 3.5-1.2 6-1.2s3.5 1.2 6 1.2 3.5-1.2 6-1.2" })],
@@ -230,11 +232,10 @@ function dayPanel(date, side) {
       return button;
     }));
 
-  // Water temperature and quality are a latest reading, not a forecast: every day shows
-  // today’s, and says so.
+  // Water temperature is a latest reading, not a forecast: every day shows today’s, and
+  // says so.
   const latestOnly = date !== state.today && {
     waterTemp: "Today’s reading. There’s no forecast for water temperature.",
-    waterQuality: "Today’s posting. SFPUC doesn’t forecast water quality.",
   };
   const factors = el("ul", { class: "factors", "aria-label": "Factors for the selected hour" },
     FACTORS.map(({ key, name, curve }, i) => {
