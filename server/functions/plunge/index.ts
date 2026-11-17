@@ -11,7 +11,7 @@
 // It also keeps a record of what sources forget: every hour, cron on the server calls
 // /collect, which saves the beach’s water quality posting (SFPUC keeps no history) and
 // the latest run’s wave height (runs vanish after about two days) to the
-// plunge_history table. /history?date= reads a past day back.
+// plunge.history table. /history?date= reads a past day back.
 
 import { nearestWater, readFields } from "./grib2.ts";
 
@@ -143,12 +143,14 @@ function local(ms: number) {
   return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) };
 }
 
-// plunge_history through the database’s REST API, as the service role (the table
+// plunge.history through the database’s REST API, as the service role (the table
 // has row-level security on and no policies, so nothing else can read or write it).
+// The profile headers pick the plunge schema; see server/schema.sql.
 async function db(path: string, init: RequestInit = {}) {
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/rest/v1/plunge_history${path}`, {
-    ...init, headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json", ...init.headers },
+  const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/rest/v1/history${path}`, {
+    ...init, headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json",
+      "Accept-Profile": "plunge", "Content-Profile": "plunge", ...init.headers },
   });
   if (!res.ok) throw new Error(`Database responded ${res.status}: ${await res.text()}`);
   return res.status === 204 || init.method === "POST" ? null : res.json();

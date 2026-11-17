@@ -7,12 +7,12 @@
 | `GET /functions/v1/plunge/water-temp` | Latest water temperature from NDBC buoy 46237 (San Francisco Bar) |
 | `GET /functions/v1/plunge/waves` | Hourly wave height at Crissy Field East Beach from the latest NWS Nearshore Wave Prediction System run (SF Bay Area grid). Each run is an 18 MB GRIB2 file; `grib2.ts` reads the one grid point at the beach. |
 | `GET /functions/v1/plunge/water-quality` | The beach’s SFPUC posting: `posted`, `clean` or `unsampled`, and the sample date |
-| `GET /functions/v1/plunge/collect` | Records what sources forget into the `plunge_history` table: this hour’s posting, and the latest wave run’s height for each past hour since yesterday. Cron calls it hourly. |
+| `GET /functions/v1/plunge/collect` | Records what sources forget into the `plunge.history` table: this hour’s posting, and the latest wave run’s height for each past hour since yesterday. Cron calls it hourly. |
 | `GET /functions/v1/plunge/history?date=YYYY-MM-DD` | A past day: the last posting recorded, wave height by hour, and the buoy’s water temperature by hour (read from the buoy’s 45-day file, not recorded) |
 
 ## History
 
-`plunge_history` lives in the same Supabase database, one row per spot, kind (`waterQuality`, `waves`), date and local hour, with the reading as JSON. Row-level security is on with no policies, so only the function (as the service role) can read or write it.
+`plunge.history` lives in the same Supabase database as other projects, in its own `plunge` schema, one row per spot, kind (`waterQuality`, `waves`), date and local hour, with the reading as JSON. Row-level security is on with no policies, so only the function (as the service role) can read or write it. [`schema.sql`](schema.sql) sets it up; `plunge` has to be in `PGRST_DB_SCHEMAS` in the server’s `~/supabase-project/.env` for the API to serve it.
 
 Cron on the server calls `/collect` at five past every hour and logs to `~/plunge-collect.log`:
 
