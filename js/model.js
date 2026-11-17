@@ -217,7 +217,9 @@ export function skyLine(sky) {
     return `${words.charAt(0).toUpperCase()}${words.slice(1)} · at ${sky.observed}`;
   }
   const wet = /rain|shower|drizzle|thunder/i.test(sky.text);
-  const words = (wet ? sky.text.replace(HEDGES, "") : sky.text).toLowerCase();
+  // A thunderstorm always rains, so “Showers and thunderstorms” says no more than “Thunderstorms”.
+  const words = (wet ? sky.text.replace(HEDGES, "") : sky.text).toLowerCase()
+    .replace(/^showers and thunderstorms\b/, "thunderstorms");
   return `${words.charAt(0).toUpperCase()}${words.slice(1)} · ${Math.round(sky.rainPct)}% ${wet ? "chance" : "rain"}`;
 }
 

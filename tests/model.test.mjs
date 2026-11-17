@@ -172,7 +172,7 @@ test("sky icon and line from the NWS short forecast", () => {
   assert.equal(skyLine({ text: "Chance Light Rain", rainPct: 28 }), "Light rain · 28% chance");
   assert.equal(skyLine({ text: "Slight Chance Light Rain", rainPct: 16 }), "Light rain · 16% chance");
   assert.equal(skyLine({ text: "Rain Likely", rainPct: 70 }), "Rain · 70% chance");
-  assert.equal(skyLine({ text: "Chance Showers And Thunderstorms", rainPct: 40 }), "Showers and thunderstorms · 40% chance");
+  assert.equal(skyLine({ text: "Chance Showers And Thunderstorms", rainPct: 40 }), "Thunderstorms · 40% chance");
   assert.equal(skyLine({ text: "Patchy Fog", rainPct: 5 }), "Patchy fog · 5% rain");
 });
 
