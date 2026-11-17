@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { currentAt, peakCurrent, transferFactor, assessCurrent, assessWaves, assessWind, windPush, overall, summarizeDay, hourSpan,
-  assessWaterQuality, waterAdvisories, advisorySummary, advisoryParagraphs, currentKnots, thresholds, skyKind, skyLine, skyText } from "../js/model.js";
+  assessWaterQuality, waterAdvisories, advisorySummary, advisoryParagraphs, currentKnots, thresholds, showsRain, skyKind, skyLine, skyText } from "../js/model.js";
 import { sunIsUp } from "../js/time.js";
 import { forDate } from "../js/sources.js";
 import spot from "../js/spots/crissy-east.js";
@@ -173,7 +173,17 @@ test("sky icon and line from the NWS short forecast", () => {
   assert.equal(skyLine({ text: "Slight Chance Light Rain", rainPct: 16 }), "Light rain · 16% chance");
   assert.equal(skyLine({ text: "Rain Likely", rainPct: 70 }), "Rain · 70% chance");
   assert.equal(skyLine({ text: "Chance Showers And Thunderstorms", rainPct: 40 }), "Thunderstorms · 40% chance");
-  assert.equal(skyLine({ text: "Patchy Fog", rainPct: 5 }), "Patchy fog · 5% rain");
+  assert.equal(skyLine({ text: "Patchy Fog", rainPct: 25 }), "Patchy fog · 25% rain");
+});
+
+test("a dry sky drops a chance of rain under 20%; a wet one keeps it", () => {
+  assert.equal(skyLine({ text: "Patchy Fog", rainPct: 5 }), "Patchy fog");
+  assert.equal(skyLine({ text: "Mostly Sunny", rainPct: 0 }), "Mostly sunny");
+  assert.equal(skyLine({ text: "Mostly Sunny", rainPct: 19.4 }), "Mostly sunny");
+  assert.equal(skyLine({ text: "Mostly Sunny", rainPct: 19.6 }), "Mostly sunny · 20% rain");
+  assert.equal(skyLine({ text: "Slight Chance Light Rain", rainPct: 8 }), "Light rain · 8% chance");
+  assert.equal(showsRain(19.4), false);
+  assert.equal(showsRain(19.6), true);
 });
 
 test("sky as reported at a station: its own words, and where", () => {

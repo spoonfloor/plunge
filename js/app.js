@@ -3,7 +3,7 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 
 import spot from "./spots/crissy-east.js";
 import { forDate, loadAll } from "./sources.js";
-import { advisoryParagraphs, advisorySummary, assessHour, skyKind, skyLine, summarizeDay, thresholds, waterAdvisories } from "./model.js";
+import { advisoryParagraphs, advisorySummary, assessHour, showsRain, skyKind, skyLine, summarizeDay, thresholds, waterAdvisories } from "./model.js";
 import { addDays, hourLabel, zonedParts, zonedToMs } from "./time.js";
 
 // The days you can swipe between: yesterday, today and five ahead. Five is as far as
@@ -197,7 +197,8 @@ function dayPanel(date, side) {
   const r = hours.find(h => h.hour === selected);
   const marks = driverMarks(r);
   const rain = rainPcts(sky, hours);
-  const hasRain = rain.some(p => p != null);
+  // The graph opens only on a day that reaches the chance worth showing.
+  const hasRain = rain.some(p => p != null && showsRain(p));
   const skyBits = sky[selected] ? [skyIcon(sky[selected]), el("span", {}, skyLine(sky[selected]))] : [];
 
   const hero = el("section", { class: "hero", "data-level": r.overall.level },

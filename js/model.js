@@ -206,10 +206,16 @@ export function skyKind(sky) {
   return sky.day ? "sun" : "moon";
 }
 
+// The lowest chance of rain worth showing. NWS forecasts don’t mention rain below 20%
+// (“Slight chance” starts there), so a lower number is noise next to a dry sky.
+const RAIN_SHOWN = 20;
+export const showsRain = pct => Math.round(pct) >= RAIN_SHOWN;
+
 // “Partly sunny · 20% rain”, or “Light rain · 28% chance” when rain is forecast: the
 // percentage already says how likely, so NWS’s hedge words (“Slight chance”, “likely”)
-// go. “Patchy fog” keeps “Patchy”, which is about where, not how likely. A reported sky
-// says where it was seen instead: “Light rain · at SFO”.
+// go. Under 20% a dry sky drops the number (“Mostly sunny”); a wet one keeps it, so rain
+// never goes without its odds. “Patchy fog” keeps “Patchy”, which is about where, not
+// how likely. A reported sky says where it was seen instead: “Light rain · at SFO”.
 const HEDGES = /^(slight chance|chance|isolated|scattered|numerous|occasional|periods of) | likely$/gi;
 export function skyLine(sky) {
   if (sky.observed) {
@@ -220,7 +226,9 @@ export function skyLine(sky) {
   // A thunderstorm always rains, so “Showers and thunderstorms” says no more than “Thunderstorms”.
   const words = (wet ? sky.text.replace(HEDGES, "") : sky.text).toLowerCase()
     .replace(/^showers and thunderstorms\b/, "thunderstorms");
-  return `${words.charAt(0).toUpperCase()}${words.slice(1)} · ${Math.round(sky.rainPct)}% ${wet ? "chance" : "rain"}`;
+  const line = `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+  if (!wet && !showsRain(sky.rainPct)) return line;
+  return `${line} · ${Math.round(sky.rainPct)}% ${wet ? "chance" : "rain"}`;
 }
 
 // ---- NWS advisories ----------------------------------------------------------------
