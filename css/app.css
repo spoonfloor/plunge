@@ -123,7 +123,6 @@ main.first-load #loader {
   min-height: 24px; line-height: 1.35; }
 .hero-sky .when { white-space: nowrap; }
 .hero-sky .sky { display: flex; align-items: center; gap: 8px; }
-.hero-sky .sky-icon { flex: none; width: 22px; height: 22px; }
 /* With a chance of rain to show, the sky is the button that opens it. */
 .rain-toggle { display: flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none;
   color: inherit; font: inherit; text-align: left; cursor: pointer; }

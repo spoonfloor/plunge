@@ -199,7 +199,7 @@ function dayPanel(date, side) {
   const rain = rainPcts(sky, hours);
   // The graph opens only on a day that reaches the chance worth showing.
   const hasRain = rain.some(p => p != null && showsRain(p));
-  const skyBits = sky[selected] ? [el("span", {}, skyLine(sky[selected])), skyIcon(sky[selected])] : [];
+  const skyBits = sky[selected] ? [el("span", {}, skyLine(sky[selected]))] : [];
   const when = whenLabel(date, selected);
 
   const hero = el("section", { class: "hero", "data-level": r.overall.level },
