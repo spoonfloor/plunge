@@ -187,8 +187,10 @@ main.first-load #loader {
 .factor { background: var(--surface-color); border-radius: var(--radius); padding: 14px 16px; }
 .factor .name { display: flex; justify-content: space-between; gap: 8px; margin: 0;
   font-size: 15px; font-weight: 600; color: var(--text-muted); }
-/* The rating in its color; unrated cards (tide) say what they’re doing there instead, muted. */
-.factor .rating { display: flex; align-items: center; gap: 10px; color: var(--chip-color, var(--text-muted)); }
+/* The rating in its color. Unrated cards (tide) say what they’re doing there instead, in
+   the accent blue of their graph’s dot and fill: no risk level uses it. */
+.factor .rating { display: flex; align-items: center; gap: 10px; color: var(--chip-color); }
+.factor[data-level="unrated"] .rating { color: var(--accent-color); }
 /* The non-expanding cards (single readings) sit a little apart from the hourly ones. */
 .factors .group-start { margin-top: 8px; }
 
