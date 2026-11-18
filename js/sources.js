@@ -133,17 +133,18 @@ const FETCHERS = {
       link: `https://tidesandcurrents.noaa.gov/noaacurrents/predictions?id=${station}_1` };
   },
 
+  // NOAA high and low tides from the day before the first day to the day after the last,
+  // so every hour shown sits between two of them. One list, not by day; model.js draws
+  // the water level between them.
   async tide(spot, dates) {
     const { station, stationName } = spot.tide;
     const json = await getJson(withQuery(COOPS, {
-      ...COOPS_COMMON, product: "predictions", station, interval: "h", datum: "MLLW",
-      begin_date: compact(dates[0]), end_date: compact(dates.at(-1)),
+      ...COOPS_COMMON, product: "predictions", station, interval: "hilo", datum: "MLLW",
+      begin_date: compact(addDays(dates[0], -1)), end_date: compact(addDays(dates.at(-1), 1)),
     }));
-    const data = byDay(dates);
-    for (const p of json.predictions) {
-      const at = localParts(p.t);
-      if (data[at.date]) data[at.date][at.hour] = Number(p.v);
-    }
+    const data = json.predictions.map(p => ({
+      ms: zonedToMs(p.t, spot.timeZone), ft: Number(p.v), type: p.type === "H" ? "high" : "low",
+    })).sort((a, b) => a.ms - b.ms);
     return { data, label: `NOAA tide predictions, ${stationName} (${station})`,
       link: `https://tidesandcurrents.noaa.gov/stationhome.html?id=${station}` };
   },
@@ -344,7 +345,7 @@ const NAMES = {
   waterQuality: "SFPUC beach water quality", alerts: "National Weather Service active alerts",
 };
 // Sources that come back by day. The rest are one reading or list for every day.
-const BY_DAY = ["tide", "waves", "wind", "windObserved", "sky", "skyObserved", "waterTemp", "waterQuality"];
+const BY_DAY = ["waves", "wind", "windObserved", "sky", "skyObserved", "waterTemp", "waterQuality"];
 
 // One day out of loadAll’s data, in the shape model.js’s assessHour takes. A source
 // that loaded but has nothing for the day gives an empty day, not null, so the card
@@ -353,7 +354,9 @@ export function forDate(data, date) {
   return { ...data, ...Object.fromEntries(BY_DAY.map(k => [k, data[k] ? data[k][date] ?? {} : null])) };
 }
 
-const cacheKey = (spot, key) => `plunge:${spot.id}:${key}`;
+// The version goes up when a source’s data changes shape, so an old saved copy is never
+// read as the new one. v2: tide became a list of highs and lows.
+const cacheKey = (spot, key) => `plunge:v2:${spot.id}:${key}`;
 function readCache(spot, key, dates) {
   try {
     const saved = JSON.parse(localStorage.getItem(cacheKey(spot, key)));

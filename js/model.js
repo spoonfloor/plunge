@@ -68,9 +68,7 @@ export function thresholds(spot) {
 // 0.6 kn line because it was really 0.58.
 const levelFor = (x, { caution, high }) => x >= high ? "high" : x >= caution ? "caution" : "low";
 
-// The tide’s height (feet above MLLW) rides along here: the current is what it does
-// to a wader, so the two share a card.
-export function assessCurrent(events, startMs, spot, tideFt = null) {
+export function assessCurrent(events, startMs, spot) {
   const channel = peakCurrent(events, startMs);
   if (channel === null) return unknown("No current prediction covers this hour.");
   const beach = round1(Math.abs(channel) * spot.current.nearshoreFactor);
@@ -85,10 +83,39 @@ export function assessCurrent(events, startMs, spot, tideFt = null) {
     notes: [
       way,
       slacks.length ? slackLine(slacks, startMs, spot.timeZone) : null,
-      tideFt != null ? `Water level ${fmt(tideFt)} ft` : null,
     ].filter(Boolean),
   };
 }
+
+// ---- Tide -------------------------------------------------------------------------
+
+// The water level (feet above MLLW) at an instant, from NOAA’s highs and lows
+// ({ ms, ft, type }, in time order): half a cosine from each one to the next, the way
+// tide tables are read between their entries. Null outside the list.
+export function tideAt(turns, ms) {
+  const i = turns.findIndex((t, k) => k + 1 < turns.length && ms >= t.ms && ms <= turns[k + 1].ms);
+  if (i < 0) return null;
+  const a = turns[i], b = turns[i + 1];
+  return a.ft + (b.ft - a.ft) * (1 - Math.cos(Math.PI * (ms - a.ms) / (b.ms - a.ms))) / 2;
+}
+
+// Tide isn’t rated: it’s shown for planning. Level “unrated”, with whether it’s rising
+// or falling where a rating would go, and the next high or low.
+export function assessTide(turns, startMs, spot) {
+  const ft = tideAt(turns, startMs);
+  if (ft === null) return unknown("No tide prediction covers this hour.");
+  const next = turns.find(t => t.ms > startMs);
+  const rising = next.type === "high";
+  return {
+    level: "unrated",
+    amount: ft,
+    trend: rising ? "Rising" : "Falling",
+    value: `${feet(ft)} ft ${rising ? "↑" : "↓"}`,
+    notes: [`${rising ? "High" : "Low"} ${feet(next.ft)} ft at ${clockTime(next.ms, spot.timeZone)}`],
+  };
+}
+// Feet to a tenth, with a true minus sign: “−0.6”.
+export const feet = ft => fmt(Math.abs(ft) < 0.05 ? 0 : ft).replace("-", "−");
 
 // ---- Waves ------------------------------------------------------------------------
 
@@ -279,10 +306,11 @@ export function advisoryParagraphs(description) {
 // (each may be null when its source failed).
 export function assessHour(hour, startMs, data, spot) {
   const factors = {
-    current: data.currents ? assessCurrent(data.currents, startMs, spot, data.tide?.[hour]) : unknown("Current predictions didn’t load."),
+    current: data.currents ? assessCurrent(data.currents, startMs, spot) : unknown("Current predictions didn’t load."),
     waves: data.waves ? assessWaves(data.waves[hour], spot) : unknown("Wave forecast didn’t load."),
     // Measured where the hour has passed, forecast otherwise.
     wind: assessWind(data.windObserved?.[hour] ?? data.wind?.[hour], spot),
+    tide: data.tide ? assessTide(data.tide, startMs, spot) : unknown("Tide predictions didn’t load."),
     waterTemp: data.waterTemp ? assessWaterTemp(data.waterTemp[hour], spot) : unknown("Water temperature didn’t load."),
     waterQuality: assessWaterQuality(data.waterQuality),
   };

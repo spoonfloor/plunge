@@ -6,7 +6,7 @@ Live at https://spoonfloor.github.io/plunge/. Install it from Safari with Share 
 
 ## How the rating works
 
-What knocks a chest-deep wader off their feet is moving water, so **current** and **waves** drive the rating. **Wind** and **water temperature** can raise it, and an SFPUC posting makes it High no matter what. **Tide** height is shown on the current card, with the next slack, but not scored. Each factor is rated on the number its card shows (0.58 kn shows as 0.6 and is rated at the 0.6 line). An hour takes its worst factor’s level, and moderate current plus moderate waves together count as high. With no current or wave data, the hour gets no rating instead of a misleading one.
+What knocks a chest-deep wader off their feet is moving water, so **current** and **waves** drive the rating. **Wind** and **water temperature** can raise it, and an SFPUC posting makes it High no matter what. **Tide** has its own card, with the day’s highs and lows on its graph, but isn’t scored. Each factor is rated on the number its card shows (0.58 kn shows as 0.6 and is rated at the 0.6 line). An hour takes its worst factor’s level, and moderate current plus moderate waves together count as high. With no current or wave data, the hour gets no rating instead of a misleading one.
 
 | Factor | Source | How it’s turned into a level |
 |---|---|---|
@@ -15,7 +15,7 @@ What knocks a chest-deep wader off their feet is moving water, so **current** an
 | Wind | NOAA measured (past hours), NWS forecast (later hours) | Sustained speed. Direction is shown as onshore, offshore or along the shore, from the way the beach faces |
 | Water quality | SFPUC beach monitoring, Crissy Field Beach East (4612) | Posted (Hazardous) for bacteria or a sewer overflow makes every hour of today High. SFPUC doesn’t forecast, so days ahead go unrated; yesterday uses the posting the server recorded |
 | Water temperature | NOAA, San Francisco (9414290); SF Bar buoy (46237) through the server function while that station is down | Under 50°F is a caution. Yesterday is rated on each hour’s own reading (Presidio, then the buoy). There’s no forecast, so today and the days ahead use the latest reading, and days ahead say so |
-| Tide | NOAA, San Francisco (9414290) | Shown only, on the current card |
+| Tide | NOAA, San Francisco (9414290), highs and lows | Shown only, on its own card |
 
 After the time on the Risk line, icons for current, waves, wind and water quality (or the water temperature itself) show what’s driving a Caution or High hour. The sky icons above the hours and the sky line under the rating come from the NWS forecast: the hourly forecast’s own words where it has the hour, and its gridpoint data for hours already past. Rain icons show intensity (light, rain, heavy); the chance of rain is the % on the sky line. Tapping the sky line opens the day’s chance of rain as a line under the sky icons, each point under its hour, with dashed lines at 0, 50 and 100%. Hours the forecast has already dropped, mostly yesterday’s, show the sky as reported at SFO (the nearest NWS station that reports it, about 17 km south), marked “at SFO”. They don’t feed the rating either. NWS advisories for the point that bear on being in the water (surf, coastal flooding, wind, marine warnings) appear below the factors, with “None” when there are none. They don’t feed the rating.
 

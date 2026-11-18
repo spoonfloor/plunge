@@ -3,7 +3,8 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 
 import spot from "./spots/crissy-east.js";
 import { forDate, loadAll } from "./sources.js";
-import { advisoryParagraphs, advisorySummary, assessHour, showsRain, skyKind, skyLine, summarizeDay, thresholds, waterAdvisories } from "./model.js";
+import { advisoryParagraphs, advisorySummary, assessHour, feet, showsRain, skyKind, skyLine, summarizeDay, thresholds, tideAt,
+  waterAdvisories } from "./model.js";
 import { addDays, hourLabel, zonedParts, zonedToMs } from "./time.js";
 
 // The days you can swipe between: yesterday, today and five ahead. Five is as far as
@@ -13,10 +14,11 @@ import { addDays, hourLabel, zonedParts, zonedToMs } from "./time.js";
 const DAYS_BACK = 1, DAYS_AHEAD = 5;
 
 const LABELS = { low: "Low", caution: "Caution", high: "High", unknown: "No rating" };
-// Factor cards in order. The first three change hour to hour and open to show the
-// day’s curve; the rest are single readings.
+// Factor cards in order. The first four change hour to hour and open to show the
+// day’s curve; the rest are single readings. Tide isn’t rated, only shown.
 const FACTORS = [
   { key: "current", name: "Current", curve: true },
+  { key: "tide", name: "Tide", curve: true },
   { key: "waves", name: "Waves", curve: true },
   { key: "wind", name: "Wind", curve: true },
   { key: "waterTemp", name: "Water temperature" },
@@ -90,7 +92,7 @@ const skyIcon = sky => svg("svg", { class: "sky-icon", viewBox: "0 0 24 24", "ar
 // date: the day shown. selected: the hour picked, or null for “now” (on other days,
 // the hour it is now). Both carry across days, so swiping compares the same hour.
 const state = { today: null, dates: [], days: {}, alerts: null, date: null, selected: null,
-  open: new Set(), rainOpen: false, advisoriesOpen: false, lastLoad: 0, loading: false };
+  open: new Set(), rainOpen: false, summaryOpen: false, advisoriesOpen: false, lastLoad: 0, loading: false };
 
 async function refresh() {
   if (state.loading) return;
@@ -115,7 +117,7 @@ async function refresh() {
         hours.push(assessHour(hour, zonedToMs(`${date} ${hour}:00`, spot.timeZone), day, spot));
       }
       // The forecast’s sky where it has the hour; what a station reported where it doesn’t.
-      return [date, { hours, sky: { ...day.skyObserved, ...day.sky } }];
+      return [date, { hours, sky: { ...day.skyObserved, ...day.sky }, tide: data.tide }];
     }));
     state.lastLoad = Date.now();
     renderStatus(sources);
@@ -148,14 +150,13 @@ const dayIndex = date => state.dates.indexOf(date);
 const utcDate = date => { const [y, m, d] = date.split("-").map(Number); return Date.UTC(y, m - 1, d); };
 const weekday = (date, style) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: style }).format(utcDate(date));
 const longDate = date => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "long", day: "numeric" }).format(utcDate(date));
-// The day and hour on the sky line, always with the weekday: “Now, Mon, 10 AM”,
-// “Today, Mon, 12 PM”, “Sun 15, 1 PM”. Only today gets a word; other days have the date,
-// and the day dots up top say where they fall.
+// The day and hour on the sky line, always with the weekday and date: “Now, Mon 16,
+// 10 AM”, “Today, Mon 16, 12 PM”, “Sun 15, 1 PM”. Today also gets a word; the day dots
+// up top say where the others fall.
 function whenLabel(date, hour) {
-  if (dayIndex(date) === dayIndex(state.today)) {
-    return `${isNow(date, hour) ? "Now" : "Today"}, ${weekday(date, "short")}, ${hourLabel(hour)}`;
-  }
-  return `${weekday(date, "short")} ${Number(date.slice(8))}, ${hourLabel(hour)}`;
+  const day = `${weekday(date, "short")} ${Number(date.slice(8))}`;
+  if (date === state.today) return `${isNow(date, hour) ? "Now" : "Today"}, ${day}, ${hourLabel(hour)}`;
+  return `${day}, ${hourLabel(hour)}`;
 }
 
 // ---- Rendering -------------------------------------------------------------------------
@@ -179,6 +180,7 @@ function render() {
     button.addEventListener("click", () => goTo(date));
     return button;
   }));
+  fitSummaries();
   const r = state.days[state.date].hours.find(h => h.hour === selectedHour());
   $("announce").textContent = `${whenLabel(state.date, r.hour)}: ${LABELS[r.overall.level]}`;
 }
@@ -192,7 +194,7 @@ function dayPanel(date, side) {
     return el("section", { class: `day end ${side < 0 ? "before" : "after"}`, inert: true, "aria-hidden": "true" },
       el("p", {}, side < 0 ? "Nothing before yesterday" : "No forecast past here"));
   }
-  const { hours, sky } = state.days[date];
+  const { hours, sky, tide } = state.days[date];
   const selected = selectedHour();
   const r = hours.find(h => h.hour === selected);
   const marks = driverMarks(r);
@@ -246,6 +248,7 @@ function dayPanel(date, side) {
       const f = r.factors[key];
       const rated = f.level in LABELS && f.level !== "unknown";
       const open = curve && state.open.has(key);
+      const graph = !open ? null : key === "tide" ? tideCurve(tide, date, selected, hours) : dayCurve(key, selected, hours);
       const card = el("li", {
         class: ["factor", curve ? "expandable" : "", i > 0 && !curve && FACTORS[i - 1].curve ? "group-start" : ""].join(" ").trim(),
         "data-level": f.level,
@@ -253,9 +256,9 @@ function dayPanel(date, side) {
         curve ? el("button", { type: "button", class: "expand", "aria-expanded": String(open),
           "aria-label": `${open ? "Hide" : "Show"} ${name.toLowerCase()} through the day` }) : null,
         el("p", { class: "name" }, el("span", {}, name),
-          el("span", { class: "rating" }, rated ? LABELS[f.level] : null, curve ? el("span", { class: "chevron", "aria-hidden": "true" }) : null)),
+          el("span", { class: "rating" }, rated ? LABELS[f.level] : f.trend, curve ? el("span", { class: "chevron", "aria-hidden": "true" }) : null)),
         el("p", { class: "value" }, f.value),
-        open ? dayCurve(key, selected, hours) : null,
+        graph,
         f.notes.map(n => el("p", { class: "note" }, n)),
         latestOnly?.[key] && rated ? el("p", { class: "note" }, latestOnly[key]) : null);
       card.querySelector(".expand")?.addEventListener("click", () => {
@@ -269,9 +272,32 @@ function dayPanel(date, side) {
     hero, skyRow,
     state.rainOpen && hasRain ? el("div", { class: "rain" }, rainCurve(rain, hours, selected)) : null,
     strip,
-    el("p", { class: "summary card" }, summarizeDay(hours)),
+    summaryCard(hours),
     factors,
     advisories(date));
+}
+
+// The day in a sentence or three, cut to two lines until tapped. Open or closed carries
+// across hours and days. Whether it needs cutting is only known once it’s on screen:
+// fitSummaries() hides the chevron when two lines hold it all.
+function summaryCard(hours) {
+  const card = el("div", { class: `summary card expandable${state.summaryOpen ? " open" : ""}` },
+    el("button", { type: "button", class: "expand", "aria-expanded": String(state.summaryOpen),
+      "aria-label": state.summaryOpen ? "Show less of the summary" : "Show all of the summary" }),
+    el("p", { class: "summary-text" }, summarizeDay(hours)),
+    el("span", { class: "chevron", "aria-hidden": "true" }));
+  card.querySelector(".expand").addEventListener("click", () => {
+    state.summaryOpen = !state.summaryOpen;
+    render();
+  });
+  return card;
+}
+function fitSummaries() {
+  for (const card of $("track").querySelectorAll(".summary")) {
+    const text = card.querySelector(".summary-text");
+    const fits = text.scrollHeight <= parseFloat(getComputedStyle(text).lineHeight) * 2 + 1;
+    card.classList.toggle("fits", fits);
+  }
 }
 
 // NWS advisories in force at some point in the day’s window, water-relevant ones only.
@@ -335,7 +361,7 @@ function dayCurve(key, selected, hours) {
   // The selected hour gets its own axis label unless it would crowd an end label.
   const nearEnd = x(si) < 44 || x(si) > plotW - 44;
 
-  return svg("svg", { class: "curve", viewBox: `0 0 ${W} ${H}`, role: "img",
+  return svg("svg", { class: "curve", viewBox: `0 0 ${W} ${H}`, role: "img", ...scrubAttrs(key, 0, x(1)),
     "aria-label": `${FACTORS.find(f => f.key === key).name} through the day: ${points.map(p => `${hourLabel(p.hour)} ${p.f.value}`).join(", ")}` },
     line(th.caution, "caution"), line(th.high, "high"),
     runs.map(r => r.length > 1 ? svg("polyline", { points: r.join(" "), class: "trace" }) : null),
@@ -343,6 +369,55 @@ function dayCurve(key, selected, hours) {
     labelAt(0, hourLabel(points[0].hour), "start"),
     nearEnd ? null : labelAt(si, hourLabel(selected), "middle"),
     labelAt(points.length - 1, hourLabel(points.at(-1).hour), "end"));
+}
+
+// Where a graph’s hours sit, so a finger on it picks the hour under it: the first hour’s
+// x and the step from one hour to the next, in the graph’s own units. key finds the
+// same graph again after each redraw.
+const scrubAttrs = (key, first, step) => ({ "data-graph": key, "data-first": first, "data-step": step });
+
+// The day’s water level, drawn like the factor curves but unrated: a smooth line from
+// NOAA’s highs and lows, shaded beneath, with a dashed line at 0 ft (MLLW; lows go
+// below it), each high and low in the window marked with its height and time, and a
+// dot at the selected hour.
+function tideCurve(turns, date, selected, hours) {
+  if (!turns) return null;
+  const W = 300, H = 140, plotW = W - 34, top = 26, bottom = 104;
+  const first = hours[0].hour, last = hours.at(-1).hour;
+  const startMs = zonedToMs(`${date} ${first}:00`, spot.timeZone);
+  const endMs = zonedToMs(`${date} ${last}:00`, spot.timeZone);
+  const x = ms => ((ms - startMs) / (endMs - startMs)) * plotW;
+  // Every ten minutes is smooth at this size.
+  const samples = [];
+  for (let ms = startMs; ms <= endMs; ms += 10 * 60e3) samples.push([ms, tideAt(turns, ms)]);
+  if (samples.some(([, ft]) => ft === null)) return null;
+  const lo = Math.min(0, ...samples.map(([, ft]) => ft)), hi = Math.max(...samples.map(([, ft]) => ft));
+  const y = ft => bottom - ((ft - lo) / (hi - lo || 1)) * (bottom - top);
+  const line = samples.map(([ms, ft]) => `${x(ms).toFixed(1)},${y(ft).toFixed(1)}`).join(" ");
+  const inWindow = turns.filter(t => t.ms >= startMs && t.ms <= endMs);
+  const short = ms => clock(ms).replace(/\s?[AP]M$/, "");
+  // Labels near either end lean inward so they stay inside the card.
+  const anchor = px => px < 40 ? "start" : px > plotW - 40 ? "end" : "middle";
+  const si = hours.findIndex(h => h.hour === selected);
+  const selMs = zonedToMs(`${date} ${selected}:00`, spot.timeZone);
+  const axis = (px, text, a) => svg("text", { x: px, y: H - 4, "text-anchor": a, class: "axis" }, text);
+  const nearEnd = x(selMs) < 44 || x(selMs) > plotW - 44;
+
+  return svg("svg", { class: "curve tide-curve", viewBox: `0 0 ${W} ${H}`, role: "img",
+    ...scrubAttrs("tide", 0, plotW / (hours.length - 1)),
+    "aria-label": `Tide through the day: ${inWindow.map(t => `${t.type} ${feet(t.ft)} feet at ${clock(t.ms)}`).join(", ") || "no high or low in these hours"}` },
+    svg("polygon", { class: "fill", points: `0,${bottom} ${line} ${plotW},${bottom}` }),
+    svg("line", { x1: 0, x2: plotW + 2, y1: y(0), y2: y(0), class: "guide" }),
+    svg("text", { x: plotW + 8, y: y(0), class: "guide-label", "dominant-baseline": "middle" }, "0"),
+    svg("polyline", { points: line, class: "trace" }),
+    inWindow.flatMap(t => [
+      svg("circle", { cx: x(t.ms), cy: y(t.ft), r: 3.5, class: "turn" }),
+      svg("text", { x: x(t.ms), y: y(t.ft) + (t.type === "high" ? -9 : 16), "text-anchor": anchor(x(t.ms)), class: "turn-label" },
+        `${feet(t.ft)} ft · ${short(t.ms)}`)]),
+    si >= 0 ? svg("circle", { cx: x(selMs), cy: y(tideAt(turns, selMs)), r: 5, class: "dot unrated" }) : null,
+    axis(0, hourLabel(first), "start"),
+    nearEnd ? null : axis(x(selMs), hourLabel(selected), "middle"),
+    axis(plotW, hourLabel(last), "end"));
 }
 
 // ---- Chance of rain through the day ---------------------------------------------------
@@ -384,7 +459,7 @@ function rainCurve(pcts, hours, selected) {
   });
   const si = hours.findIndex(h => h.hour === selected);
 
-  return svg("svg", { class: "rain-curve", viewBox: `0 0 ${W} ${H}`, role: "img",
+  return svg("svg", { class: "rain-curve", viewBox: `0 0 ${W} ${H}`, role: "img", ...scrubAttrs("rain", x(0), x(1) - x(0)),
     "aria-label": `Chance of rain through the day: ${hours.map((h, i) => pcts[i] == null ? null : `${hourLabel(h.hour)} ${Math.round(pcts[i])}%`).filter(Boolean).join(", ")}` },
     [0, 50, 100].map(v => svg("g", { class: "guide" },
       svg("line", { x1: 0, x2: (W - labelWidth(String(v)) - 6).toFixed(1), y1: y(v), y2: y(v) }),
@@ -402,8 +477,13 @@ function toggleRain(e) {
   if (refocus) $("track").children[1]?.querySelector(".rain-toggle")?.focus();
 }
 
-// A wider or narrower screen moves the hours, so the line is drawn again to match.
-addEventListener("resize", () => { if (state.rainOpen && state.dates.length) render(); });
+// A wider or narrower screen moves the hours, so the rain line is drawn again to match,
+// and changes where the summary wraps.
+addEventListener("resize", () => {
+  if (!state.dates.length) return;
+  if (state.rainOpen) render();
+  else fitSummaries();
+});
 
 // ---- Moving between days ------------------------------------------------------------------
 
@@ -449,40 +529,57 @@ function goTo(date) {
   }
 }
 
-// Touch the hour strip and drag along it to scan the hours. Anywhere else on the page,
-// a sideways swipe moves a day; vertical drags still scroll the page (touch-action:
-// pan-y in app.css). With a mouse, the dots and arrow keys change the day.
+// Touch the hour strip and drag along it to scan the hours. On a graph, tap an hour or
+// drag sideways to scan them; a drag that starts upward or downward scrolls instead, so
+// the big graphs don’t snag the page. Either way the whole page follows the hour.
+// Anywhere else, a sideways swipe moves a day; vertical drags still scroll the page
+// (touch-action: pan-y in app.css). With a mouse, the dots and arrow keys change the day.
 {
   const pager = $("pager"), track = $("track");
   let gesture = null, swiped = false;
-  const strip = () => track.children[1]?.querySelector(".strip");
-  const pick = e => {
-    const s = strip();
-    if (!s) return;
+  const current = () => track.children[1];
+  // The hour under the pointer on the strip, or on graph key (looked up afresh: each
+  // pick redraws the page).
+  const pick = (e, graph) => {
     const hours = state.days[state.date].hours;
-    const box = s.getBoundingClientRect();
-    const i = Math.floor(((e.clientX - box.left) / box.width) * hours.length);
+    let i;
+    if (graph) {
+      const g = current()?.querySelector(`[data-graph="${graph}"]`);
+      if (!g) return;
+      const box = g.getBoundingClientRect();
+      const at = ((e.clientX - box.left) / box.width) * g.viewBox.baseVal.width;
+      i = Math.round((at - Number(g.dataset.first)) / Number(g.dataset.step));
+    } else {
+      const s = current()?.querySelector(".strip");
+      if (!s) return;
+      const box = s.getBoundingClientRect();
+      i = Math.floor(((e.clientX - box.left) / box.width) * hours.length);
+    }
     select(hours[Math.min(hours.length - 1, Math.max(0, i))].hour);
   };
   pager.addEventListener("pointerdown", e => {
     swiped = false;
     if (e.button !== 0 || !state.dates.length || sliding) return;
-    if (e.target.closest(".strip") && e.target.closest(".strip") === strip()) {
+    const graph = e.target.closest("[data-graph]");
+    if (e.target.closest(".strip") && current()?.contains(e.target)) {
       gesture = { mode: "scrub" };
       pick(e);
       pager.setPointerCapture(e.pointerId);
+    } else if (graph && current()?.contains(graph)) {
+      gesture = { mode: "pending", graph: graph.dataset.graph, x: e.clientX, y: e.clientY, id: e.pointerId };
     } else if (e.pointerType !== "mouse") {
       gesture = { mode: "pending", x: e.clientX, y: e.clientY, t: e.timeStamp, id: e.pointerId, dx: 0 };
     }
   });
   pager.addEventListener("pointermove", e => {
     if (!gesture) return;
-    if (gesture.mode === "scrub") return pick(e);
+    if (gesture.mode === "scrub") return pick(e, gesture.graph);
     const dx = e.clientX - gesture.x, dy = e.clientY - gesture.y;
     if (gesture.mode === "pending") {
       if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.2) {
-        gesture.mode = "swipe";
+        gesture.mode = gesture.graph ? "scrub" : "swipe";
         pager.setPointerCapture(gesture.id);
+        if (gesture.graph) return pick(e, gesture.graph);
       } else if (Math.abs(dy) > 10) {
         gesture = null; // a scroll
         return;
@@ -497,6 +594,10 @@ function goTo(date) {
     }
   });
   pager.addEventListener("pointerup", e => {
+    if (gesture?.graph) {
+      if (gesture.mode === "pending") pick(e, gesture.graph); // a tap
+      swiped = true; // not a tap on the card behind
+    }
     if (gesture?.mode === "swipe") {
       swiped = true;
       const dx = e.clientX - gesture.x;
@@ -510,7 +611,7 @@ function goTo(date) {
     if (gesture?.mode === "swipe") slide(0, gesture.dx);
     gesture = null;
   });
-  // A swipe that ends over a card isn’t a tap on it.
+  // A swipe or scan that ends over a card isn’t a tap on it.
   pager.addEventListener("click", e => { if (swiped) { e.stopPropagation(); e.preventDefault(); swiped = false; } }, true);
 }
 

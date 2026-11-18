@@ -2,7 +2,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { currentAt, peakCurrent, transferFactor, assessCurrent, assessWaves, assessWind, windPush, overall, summarizeDay, hourSpan,
-  assessWaterQuality, waterAdvisories, advisorySummary, advisoryParagraphs, currentKnots, thresholds, showsRain, skyKind, skyLine, skyText } from "../js/model.js";
+  assessWaterQuality, waterAdvisories, advisorySummary, advisoryParagraphs, currentKnots, thresholds, showsRain, skyKind, skyLine, skyText,
+  tideAt, assessTide, feet } from "../js/model.js";
 import { sunIsUp } from "../js/time.js";
 import { forDate } from "../js/sources.js";
 import spot from "../js/spots/crissy-east.js";
@@ -107,14 +108,14 @@ test("a posting counts for today only", () => {
   assert.equal(overall(f).level, "low");
 });
 
-test("current card: direction, next two slacks and water level", () => {
+test("current card: direction and next two slacks", () => {
   const z = t => zonedToMs(t, spot.timeZone);
   const start = z("2026-11-15 13:00");
   const ev = [{ ms: start - 2 * H, knots: -2 }, { ms: start + 40 * 60e3, knots: 0 }, { ms: start + 3 * H, knots: 1.5 }];
-  const c = assessCurrent(ev, start, spot, 4.43);
+  const c = assessCurrent(ev, start, spot);
   assert.equal(c.value, "0.4 kn"); // 0.77 kn in the channel at 1 PM, half of it at the beach
-  // One slack left in the events: just that one. No tide leaves the water line out.
-  assert.deepEqual(c.notes, ["Ebb, pulling west toward the Gate", "Slack at 1:40 PM", "Water level 4.4 ft"]);
+  // One slack left in the events: just that one.
+  assert.deepEqual(c.notes, ["Ebb, pulling west toward the Gate", "Slack at 1:40 PM"]);
   const notes = (slacks, at = start) =>
     assessCurrent([{ ms: at - H, knots: 1 }, ...slacks.map(t => ({ ms: z(t), knots: 0 }))], at, spot).notes[1];
   assert.equal(notes(["2026-11-15 13:40", "2026-11-15 19:52", "2026-11-16 01:14"]), "Slack at 1:40 PM and 7:52 PM");
@@ -220,4 +221,25 @@ test("sun up or down over San Francisco on Nov 16, 2026 (sunrise ≈ 6:54 AM, su
   assert.equal(sunIsUp(at(7, 10), 37.8, -122.45), true);
   assert.equal(sunIsUp(at(16, 40), 37.8, -122.45), true);
   assert.equal(sunIsUp(at(17, 10), 37.8, -122.45), false);
+});
+
+test("tide: half a cosine between highs and lows, unrated, with the next turn", () => {
+  const z = t => zonedToMs(t, spot.timeZone);
+  const turns = [{ ms: z("2026-11-18 06:45"), ft: 4.94, type: "high" }, { ms: z("2026-11-18 12:45"), ft: -0.6, type: "low" },
+    { ms: z("2026-11-18 18:03"), ft: 4.1, type: "high" }];
+  assert.equal(tideAt(turns, z("2026-11-18 06:45")), 4.94);
+  assert.ok(Math.abs(tideAt(turns, z("2026-11-18 09:45")) - (4.94 - 0.6) / 2) < 1e-9); // halfway
+  assert.equal(tideAt(turns, z("2026-11-18 05:00")), null);
+  const t = assessTide(turns, z("2026-11-18 09:00"), spot);
+  assert.equal(t.level, "unrated");
+  assert.equal(t.trend, "Falling");
+  assert.match(t.value, /^\d\.\d ft ↓$/);
+  assert.deepEqual(t.notes, ["Low −0.6 ft at 12:45 PM"]);
+  assert.equal(assessTide(turns, z("2026-11-18 14:00"), spot).trend, "Rising");
+  assert.equal(assessTide(turns, z("2026-11-18 19:00"), spot).level, "unknown");
+  assert.equal(feet(-0.04), "0.0");
+  // Tide never moves the rating.
+  const f = { current: { level: "low" }, waves: { level: "low" }, wind: { level: "low" }, waterTemp: { level: "low" },
+    tide: t, waterQuality: { level: "low" } };
+  assert.equal(overall(f).level, "low");
 });

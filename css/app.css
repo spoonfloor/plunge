@@ -169,14 +169,26 @@ main.first-load #loader {
 .strip button:focus-visible { outline: none; }
 .strip button:focus-visible .bar { box-shadow: 0 0 0 2px var(--page-color), 0 0 0 4px var(--accent-color); }
 
-.summary { margin: 0 0 20px; padding: 14px 16px; font-size: 17px; line-height: 1.45; }
+/* Two lines until tapped open; the chevron sits on the first line, top right like the
+   factor cards’. Without anything cut off (.fits, set by app.js), it’s plain text. */
+.summary { display: flex; align-items: flex-start; gap: 12px; margin: 0 0 20px; padding: 14px 16px;
+  font-size: 17px; line-height: 1.45; }
+.summary-text { flex: 1; margin: 0; }
+.summary:not(.open) .summary-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  line-clamp: 2; overflow: hidden; }
+/* Centered on the first line (17px × 1.45), nudged as on the factor cards: up when it
+   points down, down when it points up. */
+.summary .expand ~ .chevron { margin-top: 6px; }
+.summary .expand[aria-expanded="true"] ~ .chevron { margin-top: 10px; }
+.summary.fits .expand, .summary.fits .chevron { display: none; }
 
 /* Factor cards for the selected hour, then the day’s NWS advisories in the same style. */
 .factors { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .factor { background: var(--surface-color); border-radius: var(--radius); padding: 14px 16px; }
 .factor .name { display: flex; justify-content: space-between; gap: 8px; margin: 0;
   font-size: 15px; font-weight: 600; color: var(--text-muted); }
-.factor .rating { display: flex; align-items: center; gap: 10px; color: var(--chip-color); }
+/* The rating in its color; unrated cards (tide) say what they’re doing there instead, muted. */
+.factor .rating { display: flex; align-items: center; gap: 10px; color: var(--chip-color, var(--text-muted)); }
 /* The non-expanding cards (single readings) sit a little apart from the hourly ones. */
 .factors .group-start { margin-top: 8px; }
 
@@ -187,7 +199,8 @@ main.first-load #loader {
 .expandable .expand:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
 .chevron, .advisories summary::after { flex: none; width: 8px; height: 8px; margin: 0 4px 4px 0;
   border: solid var(--text-muted); border-width: 0 2px 2px 0; transform: rotate(45deg); }
-.expand[aria-expanded="true"] ~ .name .chevron, .advisories details[open] summary::after,
+.expand[aria-expanded="true"] ~ .name .chevron, .expand[aria-expanded="true"] ~ .chevron,
+.advisories details[open] summary::after,
 .rain-toggle[aria-expanded="true"] .chevron {
   margin: 4px 4px 0 0; transform: rotate(-135deg); }
 /* On factor cards the chevron takes the rating’s color, like the label beside it. */
@@ -204,6 +217,16 @@ main.first-load #loader {
 .curve .threshold-label.high { fill: var(--high-bar); }
 .curve .dot { fill: var(--chip-bar); stroke: var(--surface-color); stroke-width: 2; }
 .curve .axis { font-size: 11px; fill: var(--text-muted); }
+/* Graphs sit above the card’s tap target: touching one picks hours (app.js) instead of
+   closing the card. */
+.expandable .curve { position: relative; z-index: 2; }
+/* Tide isn’t rated: muted like the rain graph, with the accent dot and a soft fill. */
+.curve .guide { stroke: var(--text-muted); stroke-width: 1.5; stroke-dasharray: 4 4; opacity: 0.6; }
+.curve .guide-label { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; fill: var(--text-muted); }
+.curve .fill { fill: color-mix(in srgb, var(--accent-fill), transparent 84%); }
+.curve .turn { fill: var(--surface-color); stroke: var(--text-muted); stroke-width: 1.5; }
+.curve .turn-label { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; fill: var(--text-muted); }
+.curve .dot.unrated { fill: var(--accent-fill); }
 .factor .value { margin: 2px 0 0; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em; }
 .factor .value + .note { margin-top: 6px; }
