@@ -122,6 +122,8 @@ main.first-load #loader {
 .hero-sky { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; row-gap: 2px;
   min-height: 24px; line-height: 1.35; }
 .hero-sky .when { white-space: nowrap; }
+/* The current hour stands out: “NOW” heavier, in the accent. */
+.hero-sky .now-word { color: var(--accent-color); font-weight: 700; text-transform: uppercase; }
 .hero-sky .sky { display: flex; align-items: center; gap: 8px; }
 /* With a chance of rain to show, the sky is the button that opens it. */
 .rain-toggle { display: flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none;

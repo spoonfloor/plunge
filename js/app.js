@@ -152,11 +152,22 @@ const weekday = (date, style) => new Intl.DateTimeFormat("en-US", { timeZone: "U
 const longDate = date => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "long", day: "numeric" }).format(utcDate(date));
 // The day and hour on the sky line, always with the weekday and date: “Now, Mon 16,
 // 10 AM”, “Today, Mon 16, 12 PM”, “Sun 15, 1 PM”. Today also gets a word; the day dots
-// up top say where the others fall.
+// up top say where the others fall. On the page the current hour reads “NOW • Mon 16,
+// 10 AM” (see nowWord); whenLabel is the plain text the announcer reads.
+function whenParts(date, hour) {
+  const rest = `${weekday(date, "short")} ${Number(date.slice(8))}, ${hourLabel(hour)}`;
+  const word = date !== state.today ? null : isNow(date, hour) ? "Now" : "Today";
+  return { word, rest };
+}
 function whenLabel(date, hour) {
-  const day = `${weekday(date, "short")} ${Number(date.slice(8))}`;
-  if (date === state.today) return `${isNow(date, hour) ? "Now" : "Today"}, ${day}, ${hourLabel(hour)}`;
-  return `${day}, ${hourLabel(hour)}`;
+  const { word, rest } = whenParts(date, hour);
+  return word ? `${word}, ${rest}` : rest;
+}
+// The sky line’s copy of whenLabel: “Now” set apart in the accent, then a bullet.
+function whenNodes(date, hour) {
+  const { word, rest } = whenParts(date, hour);
+  if (word === "Now") return [el("span", { class: "now-word" }, "Now"), ` • ${rest}`];
+  return [word ? `${word}, ${rest}` : rest];
 }
 
 // ---- Rendering -------------------------------------------------------------------------
@@ -202,7 +213,7 @@ function dayPanel(date, side) {
   // The graph opens only on a day that reaches the chance worth showing.
   const hasRain = rain.some(p => p != null && showsRain(p));
   const skyBits = sky[selected] ? [el("span", {}, skyLine(sky[selected]))] : [];
-  const when = whenLabel(date, selected);
+  const when = whenNodes(date, selected);
 
   const hero = el("section", { class: "hero", "data-level": r.overall.level },
     el("p", { class: "hero-risk eyebrow" },
@@ -210,10 +221,10 @@ function dayPanel(date, side) {
       marks.length ? el("span", { class: "drivers", role: "img",
         "aria-label": `because of ${r.overall.drivers.map(k => FACTORS.find(f => f.key === k)?.name.toLowerCase()).join(" and ")}` }, marks) : null),
     el("p", { class: "level-word" }, LABELS[r.overall.level]),
-    // The hour, then its sky: “Now, Tue, 3 PM · Sunny”. The sky part opens the day’s
+    // The hour, then its sky: “NOW • Tue 17, 3 PM · Sunny”. The sky part opens the day’s
     // chance of rain, when the forecast has it.
     el("p", { class: "hero-sky eyebrow" },
-      el("span", { class: "when" }, skyBits.length ? `${when} ·` : when),
+      el("span", { class: "when" }, when, skyBits.length ? " ·" : null),
       hasRain
         ? el("button", { type: "button", class: "sky rain-toggle", "aria-expanded": String(state.rainOpen) },
           skyBits, el("span", { class: "visually-hidden" }, "Chance of rain through the day"),
