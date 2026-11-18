@@ -148,14 +148,14 @@ const dayIndex = date => state.dates.indexOf(date);
 const utcDate = date => { const [y, m, d] = date.split("-").map(Number); return Date.UTC(y, m - 1, d); };
 const weekday = (date, style) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: style }).format(utcDate(date));
 const longDate = date => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "long", day: "numeric" }).format(utcDate(date));
-// The day and hour on the Risk line, always with the weekday: “Now, Mon, 10 AM”,
-// “Today, Mon, 12 PM”, “Yesterday, Sun 15, 1 PM”, “Tomorrow, Tue 17, 1 PM”, “Thu 19, 1 PM”.
+// The day and hour on the sky line, always with the weekday: “Now, Mon, 10 AM”,
+// “Today, Mon, 12 PM”, “Sun 15, 1 PM”. Only today gets a word; other days have the date,
+// and the day dots up top say where they fall.
 function whenLabel(date, hour) {
-  const wd = weekday(date, "short"), wdDate = `${wd} ${Number(date.slice(8))}`;
-  const n = dayIndex(date) - dayIndex(state.today);
-  if (n === 0) return `${isNow(date, hour) ? "Now" : "Today"}, ${wd}, ${hourLabel(hour)}`;
-  const word = n === -1 ? "Yesterday, " : n === 1 ? "Tomorrow, " : "";
-  return `${word}${wdDate}, ${hourLabel(hour)}`;
+  if (dayIndex(date) === dayIndex(state.today)) {
+    return `${isNow(date, hour) ? "Now" : "Today"}, ${weekday(date, "short")}, ${hourLabel(hour)}`;
+  }
+  return `${weekday(date, "short")} ${Number(date.slice(8))}, ${hourLabel(hour)}`;
 }
 
 // ---- Rendering -------------------------------------------------------------------------
@@ -199,20 +199,24 @@ function dayPanel(date, side) {
   const rain = rainPcts(sky, hours);
   // The graph opens only on a day that reaches the chance worth showing.
   const hasRain = rain.some(p => p != null && showsRain(p));
-  const skyBits = sky[selected] ? [skyIcon(sky[selected]), el("span", {}, skyLine(sky[selected]))] : [];
+  const skyBits = sky[selected] ? [el("span", {}, skyLine(sky[selected])), skyIcon(sky[selected])] : [];
+  const when = whenLabel(date, selected);
 
   const hero = el("section", { class: "hero", "data-level": r.overall.level },
-    el("p", { class: "hero-when eyebrow" },
-      el("span", { class: "when" }, `Risk · ${whenLabel(date, selected)}`),
+    el("p", { class: "hero-risk eyebrow" },
+      el("span", {}, "Risk"),
       marks.length ? el("span", { class: "drivers", role: "img",
         "aria-label": `because of ${r.overall.drivers.map(k => FACTORS.find(f => f.key === k)?.name.toLowerCase()).join(" and ")}` }, marks) : null),
     el("p", { class: "level-word" }, LABELS[r.overall.level]),
-    // The sky line opens the day’s chance of rain, when the forecast has it.
-    el("p", { class: "hero-sky" }, hasRain
-      ? el("button", { type: "button", class: "rain-toggle", "aria-expanded": String(state.rainOpen) },
-        skyBits, el("span", { class: "visually-hidden" }, "Chance of rain through the day"),
-        el("span", { class: "chevron", "aria-hidden": "true" }))
-      : skyBits));
+    // The hour, then its sky: “Now, Tue, 3 PM · Sunny”. The sky part opens the day’s
+    // chance of rain, when the forecast has it.
+    el("p", { class: "hero-sky eyebrow" },
+      el("span", { class: "when" }, skyBits.length ? `${when} ·` : when),
+      hasRain
+        ? el("button", { type: "button", class: "sky rain-toggle", "aria-expanded": String(state.rainOpen) },
+          skyBits, el("span", { class: "visually-hidden" }, "Chance of rain through the day"),
+          el("span", { class: "chevron", "aria-hidden": "true" }))
+        : el("span", { class: "sky" }, skyBits)));
   hero.querySelector(".rain-toggle")?.addEventListener("click", toggleRain);
 
   const skyRow = el("div", { class: "sky-row", "aria-hidden": "true", style: `--hours: ${hours.length}` },

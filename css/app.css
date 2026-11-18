@@ -108,21 +108,23 @@ main.first-load #loader {
 
 /* The selected hour, big. */
 .hero { padding: 12px 0 16px; }
-/* Risk · time, then what’s driving the rating, in the rating’s color. The time never
-   splits; on a narrow screen the marks wrap instead. */
-.hero-when { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 2px; }
-.hero-when .when { white-space: nowrap; }
-.hero-when .drivers { display: flex; align-items: center; gap: 6px; color: var(--chip-color); }
+/* Risk, then what’s driving the rating, in the rating’s color. */
+.hero-risk { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 2px; }
+.hero-risk .drivers { display: flex; align-items: center; gap: 6px; color: var(--chip-color); }
 .driver-icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8;
   stroke-linecap: round; stroke-linejoin: round; }
 .driver-icon .dots { stroke-width: 2.4; }
 .driver-temp { font-variant-numeric: tabular-nums; }
 .level-word { margin: 2px 0 4px; font-size: 56px; line-height: 1.05; font-weight: 700;
   letter-spacing: -0.02em; color: var(--chip-color, var(--text-color)); }
-.hero-sky { display: flex; align-items: center; gap: 8px; min-height: 24px; margin: 0;
-  font-size: 17px; line-height: 1.4; color: var(--text-muted); }
-.hero-sky .sky-icon { width: 26px; height: 26px; }
-/* With a chance of rain to show, the sky line is the button that opens it. */
+/* The hour, then its sky. The time never splits; when the line is too long, the sky
+   moves whole to a second line instead of breaking mid-phrase. */
+.hero-sky { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; row-gap: 2px;
+  min-height: 24px; line-height: 1.35; }
+.hero-sky .when { white-space: nowrap; }
+.hero-sky .sky { display: flex; align-items: center; gap: 8px; }
+.hero-sky .sky-icon { flex: none; width: 22px; height: 22px; }
+/* With a chance of rain to show, the sky is the button that opens it. */
 .rain-toggle { display: flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none;
   color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .rain-toggle:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 4px; border-radius: 4px; }
