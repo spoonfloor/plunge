@@ -604,7 +604,10 @@ function goTo(date) {
     swiped = false;
     if (e.button !== 0 || !state.dates.length || sliding) return;
     const graph = e.target.closest("[data-graph]");
-    if (e.target.closest(".strip") && current()?.contains(e.target)) {
+    const strip = e.target.closest(".strip");
+    // A mouse drag on the strip or a graph scans hours, so it mustn’t also select text.
+    if (e.pointerType === "mouse" && current()?.contains(strip ?? graph)) e.preventDefault();
+    if (strip && current()?.contains(strip)) {
       gesture = { mode: "scrub" };
       pick(e);
       pager.setPointerCapture(e.pointerId);
