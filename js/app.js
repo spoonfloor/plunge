@@ -135,17 +135,16 @@ async function refresh() {
 const clampHour = h => Math.min(spot.lastHour, Math.max(spot.firstHour, h));
 const now = () => zonedParts(Date.now(), spot.timeZone);
 const selectedHour = () => state.selected ?? clampHour(now().hour);
-// Where “now” falls in the day’s window: the current hour, or the nearest end of it.
-// Null on any other day.
-function nowHour(date) {
-  const n = now();
-  return n.date === date ? clampHour(n.hour) : null;
-}
 function isPast(date, hour) {
   const n = now();
   return n.date === date && hour < n.hour;
 }
-const isNow = (date, hour) => hour === nowHour(date) && !isPast(date, hour);
+// Only the real current hour is “now”: before the window opens or after it closes, no
+// hour is, even though selectedHour lands on the nearest end of the window.
+function isNow(date, hour) {
+  const n = now();
+  return n.date === date && hour === n.hour;
+}
 
 const dayIndex = date => state.dates.indexOf(date);
 const utcDate = date => { const [y, m, d] = date.split("-").map(Number); return Date.UTC(y, m - 1, d); };
