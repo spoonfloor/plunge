@@ -3,8 +3,8 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 
 import spot from "./spots/crissy-east.js";
 import { forDate, loadAll } from "./sources.js";
-import { advisoryParagraphs, advisorySummary, assessHour, feet, showsRain, skyKind, skyLine, summarizeDay, thresholds, tideAt,
-  waterAdvisories } from "./model.js";
+import { advisoryParagraphs, advisorySummary, assessHour, currentAt, feet, showsRain, skyKind, skyLine, summarizeDay, thresholds,
+  tideAt, waterAdvisories } from "./model.js";
 import { addDays, hourLabel, zonedParts, zonedToMs } from "./time.js";
 
 // The days you can swipe between: yesterday, today and five ahead. Five is as far as
@@ -354,20 +354,39 @@ function select(hour) {
 // The day’s values for one factor: a line through the hours, dashed lines at the
 // caution and high thresholds with their numbers at the right end, and a dot at the
 // selected hour in its rating’s color. For the current, events (NOAA’s slacks and maxes)
-// adds an open circle on the line at each slack’s time: it marks when, not the speed,
-// since the line joins each hour’s strongest current and so never reaches 0.
+// draws the speed moment by moment instead, every 6 minutes, so it dips to 0 at each
+// slack, marked with an open circle. The dot then sits on that line at the start of the
+// hour, while its color and the card’s number are still the hour’s strongest current.
 function dayCurve(key, selected, hours, events = null) {
   const W = 300, H = 126, plotW = W - 34, top = 12, bottom = H - 22;
   const points = hours.map(h => ({ hour: h.hour, f: h.factors[key] }));
   const th = THRESHOLDS[key];
-  const max = Math.max(th.high * 1.2, ...points.map(p => (p.f.amount ?? 0) * 1.1));
+
+  // Where an instant falls among the hours, as a fractional hour index (-1 outside them).
+  const indexAt = ms => {
+    const i = hours.findIndex((h, k) => k + 1 < hours.length && ms >= h.startMs && ms <= hours[k + 1].startMs);
+    return i < 0 ? -1 : i + (ms - hours[i].startMs) / (hours[i + 1].startMs - hours[i].startMs);
+  };
+  const beach = ms => { const v = currentAt(events, ms); return v === null ? null : Math.abs(v) * spot.current.nearshoreFactor; };
+  let moments = null, slacks = [];
+  if (events) {
+    slacks = events.filter(e => e.knots === 0 && e.ms > hours[0].startMs && e.ms < hours.at(-1).startMs).map(e => e.ms);
+    const times = [...slacks];
+    for (let ms = hours[0].startMs; ms <= hours.at(-1).startMs; ms += 6 * 60e3) times.push(ms);
+    moments = times.sort((a, b) => a - b).map(ms => [indexAt(ms), beach(ms)]);
+    if (moments.some(([, kn]) => kn === null)) moments = slacks = null;
+  }
+
+  const values = moments ? moments.map(([, kn]) => kn) : points.map(p => p.f.amount ?? 0);
+  const max = Math.max(th.high * 1.2, ...values.map(v => v * 1.1));
   const x = i => (i / (points.length - 1)) * plotW;
   const y = v => bottom - (v / max) * (bottom - top);
   const fmtTh = v => key === "current" ? v.toFixed(1) : String(v);
 
-  // One polyline per run of hours that have a value.
+  // One polyline per run of hours that have a value, or one through every moment.
   const runs = [];
-  points.forEach((p, i) => {
+  if (moments) runs.push(moments.map(([i, kn]) => `${x(i).toFixed(1)},${y(kn).toFixed(1)}`));
+  else points.forEach((p, i) => {
     if (p.f.amount == null) return;
     if (i === 0 || points[i - 1].f.amount == null) runs.push([]);
     runs.at(-1).push(`${x(i).toFixed(1)},${y(p.f.amount).toFixed(1)}`);
@@ -379,25 +398,17 @@ function dayCurve(key, selected, hours, events = null) {
   ];
   const si = points.findIndex(p => p.hour === selected);
   const sel = points[si];
+  const dotY = sel?.f.amount == null ? null : y(moments ? beach(hours[si].startMs) : sel.f.amount);
   const labelAt = (i, text, anchor) => svg("text", { x: x(i), y: H - 4, "text-anchor": anchor, class: "axis" }, text);
   // The selected hour gets its own axis label unless it would crowd an end label.
   const nearEnd = x(si) < 44 || x(si) > plotW - 44;
-
-  // Each slack between two hours with values, placed by time between them.
-  const slacks = (events ?? []).filter(e => e.knots === 0).flatMap(e => {
-    const i = hours.findIndex((h, k) => k + 1 < hours.length && e.ms >= h.startMs && e.ms < hours[k + 1].startMs);
-    const a = points[i]?.f.amount, b = points[i + 1]?.f.amount;
-    if (i < 0 || a == null || b == null) return [];
-    const t = (e.ms - hours[i].startMs) / (hours[i + 1].startMs - hours[i].startMs);
-    return [{ cx: x(i + t), cy: y(a + (b - a) * t) }];
-  });
 
   return svg("svg", { class: "curve", viewBox: `0 0 ${W} ${H}`, role: "img", ...scrubAttrs(key, 0, x(1)),
     "aria-label": `${FACTORS.find(f => f.key === key).name} through the day: ${points.map(p => `${hourLabel(p.hour)} ${p.f.value}`).join(", ")}` },
     line(th.caution, "caution"), line(th.high, "high"),
     runs.map(r => r.length > 1 ? svg("polyline", { points: r.join(" "), class: "trace" }) : null),
-    slacks.map(s => svg("circle", { ...s, r: 3.5, class: "turn" })),
-    sel?.f.amount != null ? svg("circle", { cx: x(si), cy: y(sel.f.amount), r: 5, class: "dot", "data-level": sel.f.level }) : null,
+    (slacks ?? []).map(ms => svg("circle", { cx: x(indexAt(ms)), cy: y(0), r: 3.5, class: "turn" })),
+    dotY != null ? svg("circle", { cx: x(si), cy: dotY, r: 5, class: "dot", "data-level": sel.f.level }) : null,
     labelAt(0, hourLabel(points[0].hour), "start"),
     nearEnd ? null : labelAt(si, hourLabel(selected), "middle"),
     labelAt(points.length - 1, hourLabel(points.at(-1).hour), "end"));
