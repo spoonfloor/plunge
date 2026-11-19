@@ -180,10 +180,24 @@ function renderStatus(sources) {
 }
 
 // The shown day with the day before and after it beside it, ready to swipe in, and the
-// dots that say which day this is.
+// dots that say which day this is. While the hour strip is pinned, the page under it
+// holds still: if the hero above, out
+// of sight, comes back taller or shorter (the sky line wrapping, say), the page scrolls
+// by the difference, so the change goes up under the top bar instead of pushing the
+// cards down. All before the next paint, so nothing jumps.
 function render() {
   const i = dayIndex(state.date);
+  // The new strip starts out unfolded, which makes it taller; it takes the old one’s
+  // fold before measuring, so only the change above counts.
+  const strip = () => $("track").children[1]?.querySelector(".hours");
+  const foldWas = strip()?.style.getPropertyValue("--fold");
+  const anchor = pinned() ? strip()?.nextElementSibling?.getBoundingClientRect().top : undefined;
   $("track").replaceChildren(dayPanel(state.dates[i - 1], -1), dayPanel(state.date, 0), dayPanel(state.dates[i + 1], 1));
+  if (anchor !== undefined && strip()) {
+    strip().style.setProperty("--fold", foldWas);
+    const moved = (strip().nextElementSibling?.getBoundingClientRect().top ?? anchor) - anchor;
+    if (moved) scrollBy(0, moved);
+  }
   $("days").replaceChildren(...state.dates.map(date => {
     const button = el("button", { type: "button", class: date === state.today ? "today" : null,
       "aria-current": date === state.date ? "true" : null,
@@ -541,13 +555,23 @@ addEventListener("resize", () => {
 // its last FADE_PX before reaching the top bar, gone before the readout fades in over them.
 // Only the day shown pins: the neighbors are 0 tall (see .day[inert]), so they can’t.
 const FOLD_PX = 40, FADE_PX = 32;
-function fold() {
-  const day = $("track").children[1];
-  const block = day?.querySelector(".hours");
-  if (!block) return;
+// How far the shown day’s hour strip sits below where it would be unpinned: 0 or less
+// until it pins. null with no strip.
+function pinDepth() {
+  const block = $("track").children[1]?.querySelector(".hours");
+  if (!block) return null;
   const above = block.previousElementSibling;
   const unpinnedTop = above.getBoundingClientRect().bottom + parseFloat(getComputedStyle(above).marginBottom);
-  const p = Math.min(1, Math.max(0, (parseFloat(getComputedStyle(block).top) - unpinnedTop) / FOLD_PX));
+  return parseFloat(getComputedStyle(block).top) - unpinnedTop;
+}
+const pinned = () => pinDepth() > 0;
+
+function fold() {
+  const day = $("track").children[1];
+  const depth = pinDepth();
+  if (depth === null) return;
+  const block = day.querySelector(".hours");
+  const p = Math.min(1, Math.max(0, depth / FOLD_PX));
   block.style.setProperty("--fold", p.toFixed(3));
   const cut = $("top-bar").getBoundingClientRect().bottom;
   for (const fading of day.querySelectorAll(".sky-row, .rain")) {
