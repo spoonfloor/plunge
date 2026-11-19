@@ -109,9 +109,13 @@ main.first-load #loader {
 @media (prefers-reduced-motion: reduce) { main.first-load #loader { animation: none; } }
 
 /* The selected hour, big. */
-.hero { padding: 12px 0 16px; }
-/* Risk, then what’s driving the rating, in the rating’s color. */
-.hero-risk { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 2px; }
+/* 11px on top, plus the Risk line’s half-leading, puts its capitals where the comment on
+   #days says. */
+.hero { padding: 11px 0 16px; }
+/* Risk, then what’s driving the rating, in the rating’s color. The line is as tall as
+   the icons, so a rating with drivers sits exactly where one without does. */
+.hero-risk { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 2px;
+  line-height: 20px; }
 .hero-risk .drivers { display: flex; align-items: center; gap: 6px; color: var(--chip-color); }
 .driver-icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8;
   stroke-linecap: round; stroke-linejoin: round; }
@@ -120,9 +124,10 @@ main.first-load #loader {
 .level-word { margin: 2px 0 4px; font-size: 56px; line-height: 1.05; font-weight: 700;
   letter-spacing: -0.02em; color: var(--chip-color, var(--text-color)); }
 /* The hour, then its sky. The time never splits; when the line is too long, the sky
-   moves whole to a second line instead of breaking mid-phrase. */
-.hero-sky { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; row-gap: 2px;
-  min-height: 24px; line-height: 1.35; }
+   moves whole to a second line instead of breaking mid-phrase. Each line is a fixed
+   20px on a shared baseline, so the first sits in the same place on one line or two. */
+.hero-sky { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; row-gap: 2px;
+  line-height: 20px; }
 .hero-sky .when { white-space: nowrap; }
 /* The current hour stands out: “NOW” heavier, in the accent (sky line and readout). */
 .now-word { color: var(--accent-color); font-weight: 700; text-transform: uppercase; }
