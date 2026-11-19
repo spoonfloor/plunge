@@ -555,28 +555,60 @@ addEventListener("resize", () => {
 // its last FADE_PX before reaching the top bar, gone before the readout fades in over them.
 // Only the day shown pins: the neighbors are 0 tall (see .day[inert]), so they can’t.
 const FOLD_PX = 40, FADE_PX = 32;
+// Where a day’s hour strip would sit unpinned: just under whatever is above it.
+function unpinnedTop(block) {
+  const above = block.previousElementSibling;
+  return above.getBoundingClientRect().bottom + parseFloat(getComputedStyle(above).marginBottom);
+}
 // How far the shown day’s hour strip sits below where it would be unpinned: 0 or less
 // until it pins. null with no strip.
 function pinDepth() {
   const block = $("track").children[1]?.querySelector(".hours");
   if (!block) return null;
-  const above = block.previousElementSibling;
-  const unpinnedTop = above.getBoundingClientRect().bottom + parseFloat(getComputedStyle(above).marginBottom);
-  return parseFloat(getComputedStyle(block).top) - unpinnedTop;
+  return parseFloat(getComputedStyle(block).top) - unpinnedTop(block);
 }
 const pinned = () => pinDepth() > 0;
 
+// Days lined up to slide in (alignNeighbors) fold and fade along with the shown day.
 function fold() {
   const day = $("track").children[1];
   const depth = pinDepth();
   if (depth === null) return;
-  const block = day.querySelector(".hours");
   const p = Math.min(1, Math.max(0, depth / FOLD_PX));
-  block.style.setProperty("--fold", p.toFixed(3));
   const cut = $("top-bar").getBoundingClientRect().bottom;
-  for (const fading of day.querySelectorAll(".sky-row, .rain")) {
-    const o = Math.min(1, Math.max(0, (fading.getBoundingClientRect().top - cut) / FADE_PX));
-    fading.style.opacity = o < 1 ? o.toFixed(3) : "";
+  for (const d of [day, ...$("track").querySelectorAll(".day.aligned")]) {
+    d.querySelector(".hours").style.setProperty("--fold", p.toFixed(3));
+    for (const fading of d.querySelectorAll(".sky-row, .rain")) {
+      const o = Math.min(1, Math.max(0, (fading.getBoundingClientRect().top - cut) / FADE_PX));
+      fading.style.opacity = o < 1 ? o.toFixed(3) : "";
+    }
+  }
+}
+
+// While the strip is pinned, the days either side get ready to slide in looking just as
+// they will once they land: tall enough for their strips to pin (see .day.aligned),
+// folded like the shown day’s, and moved up or down so what’s under their strips lines
+// up with what’s under this one, which is where render() holds it when the day changes.
+// render() builds them afresh, 0 tall again; a swipe that springs back undoes it here.
+function alignNeighbors() {
+  if (!pinned()) return;
+  const [before, shown, after] = $("track").children;
+  const top = el => el.getBoundingClientRect().top;
+  const shownAbove = unpinnedTop(shown.querySelector(".hours")) - top(shown);
+  for (const day of [before, after]) {
+    const strip = day?.querySelector(".hours");
+    if (!strip || day.classList.contains("aligned")) continue;
+    day.style.marginTop = `${shownAbove - (unpinnedTop(strip) - top(day))}px`;
+    day.classList.add("aligned");
+  }
+  fold();
+}
+function unalignNeighbors() {
+  for (const day of $("track").querySelectorAll(".day.aligned")) {
+    day.classList.remove("aligned");
+    day.style.marginTop = "";
+    day.querySelector(".hours").style.removeProperty("--fold");
+    for (const fading of day.querySelectorAll(".sky-row, .rain")) fading.style.opacity = "";
   }
 }
 let foldQueued = false;
@@ -602,6 +634,7 @@ function show(date) {
 async function slide(delta, fromPx = 0) {
   if (sliding) return;
   sliding = true;
+  alignNeighbors();
   const w = $("pager").clientWidth;
   const target = delta ? state.dates[dayIndex(state.date) + delta] : null;
   const to = target ? -w - delta * w : -w;
@@ -614,6 +647,7 @@ async function slide(delta, fromPx = 0) {
   // unfinished; the day changes on time regardless, so swipes never lock up.
   await Promise.race([move.finished.catch(() => {}), new Promise(done => setTimeout(done, duration + 150))]);
   if (target) show(target);
+  else unalignNeighbors();
   move.cancel();
   sliding = false;
 }
@@ -683,6 +717,7 @@ function goTo(date) {
       if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.2) {
         gesture.mode = gesture.graph ? "scrub" : "swipe";
         pager.setPointerCapture(gesture.id);
+        if (gesture.mode === "swipe") alignNeighbors();
         if (gesture.graph) return pick(e, gesture.graph);
       } else if (Math.abs(dy) > 10) {
         gesture = null; // a scroll

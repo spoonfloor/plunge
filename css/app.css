@@ -60,6 +60,8 @@ main { box-sizing: border-box; max-width: 640px; margin: 0 auto;
 .day { flex: 0 0 100%; min-width: 0; box-sizing: border-box;
   padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); }
 .day[inert] { height: 0; }
+/* About to slide in with the strip pinned: full height, so its strip can pin too. */
+.day[inert].aligned { height: auto; }
 /* Past either end: a note on the side that shows while the page resists the swipe. */
 .day.end p { margin: 0; padding-top: 120px; max-width: 110px; color: var(--text-muted); font-size: 15px; line-height: 1.35; }
 .day.end.before p { margin-left: auto; text-align: right; }
