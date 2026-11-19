@@ -53,7 +53,9 @@ main { box-sizing: border-box; max-width: 640px; margin: 0 auto;
    Only the day shown sets the height: the others overflow into the clipped area. Each
    day carries the side gutters, so the pager can clip at the screen edge without
    cutting the hour strip’s selection ring. */
-#pager { overflow: hidden; touch-action: pan-y; }
+/* clip, not hidden: hidden would make the pager a scroll container and stop the hour
+   strip pinning to the screen (.hours). */
+#pager { overflow: clip; touch-action: pan-y; }
 #track { display: flex; align-items: flex-start; transform: translateX(-100%); }
 .day { flex: 0 0 100%; min-width: 0; box-sizing: border-box;
   padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); }
@@ -122,8 +124,8 @@ main.first-load #loader {
 .hero-sky { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; row-gap: 2px;
   min-height: 24px; line-height: 1.35; }
 .hero-sky .when { white-space: nowrap; }
-/* The current hour stands out: “NOW” heavier, in the accent. */
-.hero-sky .now-word { color: var(--accent-color); font-weight: 700; text-transform: uppercase; }
+/* The current hour stands out: “NOW” heavier, in the accent (sky line and readout). */
+.now-word { color: var(--accent-color); font-weight: 700; text-transform: uppercase; }
 .hero-sky .sky { display: flex; align-items: center; gap: 8px; }
 /* With a chance of rain to show, the sky is the button that opens it. */
 .rain-toggle { display: flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none;
@@ -153,13 +155,33 @@ main.first-load #loader {
 .sky-row .sky-icon { width: 24px; height: 24px; }
 .sky-row .past { opacity: 0.4; }
 
+/* The sky icons and hour strip pin under the top bar once scrolled to, so hours stay
+   pickable while reading the cards. --fold (0 → 1, set by fold() in app.js) folds them
+   down as the page scrolls on: the sky row closes (app.js sets .fold’s height), the bars
+   halve, the readout of the picked hour opens and a line fades in underneath. The block
+   reaches into the side gutters so the line runs the page’s width. Above the graphs
+   (z-index 2) that scroll under it. */
+.hours { --fold: 0; position: sticky; z-index: 3;
+  top: calc(env(safe-area-inset-top) + var(--top-bar-height) + var(--day-dots-height));
+  margin: 0 calc(-1 * max(16px, env(safe-area-inset-right))) 0 calc(-1 * max(16px, env(safe-area-inset-left)));
+  padding: 0 max(16px, env(safe-area-inset-right)) calc(20px - 8px * var(--fold)) max(16px, env(safe-area-inset-left));
+  background: var(--page-color);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--line-color), transparent calc(100% - 100% * var(--fold))); }
+.hours .fold { overflow: hidden; }
+/* The picked hour while the hero is out of sight: “Caution  NOW • Thu 19, 10 AM”. */
+.readout { display: flex; align-items: baseline; gap: 8px; margin: 0; overflow: hidden;
+  height: calc(26px * var(--fold)); opacity: var(--fold);
+  color: var(--text-muted); font-size: 15px; font-weight: 500; white-space: nowrap; }
+.readout .level { color: var(--chip-color); font-weight: 700; }
+
 /* One column per hour, colored by rating. Tap to select. */
 /* touch-action: horizontal drags scrub the hours (app.js); vertical ones scroll. */
-.strip { display: grid; grid-template-columns: repeat(var(--hours, 12), 1fr); gap: 3px; margin-bottom: 20px;
+.strip { display: grid; grid-template-columns: repeat(var(--hours, 12), 1fr); gap: 3px;
   touch-action: pan-y; }
 .strip button { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0;
-  border: 0; background: none; color: var(--text-muted); font: inherit; cursor: pointer; min-height: 64px; }
-.strip .bar { width: 100%; height: 40px; border-radius: 6px; background: var(--chip-bar);
+  border: 0; background: none; color: var(--text-muted); font: inherit; cursor: pointer;
+  min-height: calc(64px - 20px * var(--fold, 0)); }
+.strip .bar { width: 100%; height: calc(40px - 20px * var(--fold, 0)); border-radius: 6px; background: var(--chip-bar);
   box-sizing: border-box; }
 .strip .past .bar { opacity: 0.4; }
 .strip .label { font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1; }
