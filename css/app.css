@@ -155,23 +155,28 @@ main.first-load #loader {
 .sky-row .sky-icon { width: 24px; height: 24px; }
 .sky-row .past { opacity: 0.4; }
 
-/* The sky icons and hour strip pin under the top bar once scrolled to, so hours stay
-   pickable while reading the cards. --fold (0 → 1, set by fold() in app.js) folds them
-   down as the page scrolls on: the sky row closes (app.js sets .fold’s height), the bars
-   halve, the readout of the picked hour opens and a line fades in underneath. The block
+/* The hour strip pins under the top bar once scrolled to, so hours stay pickable while
+   reading the cards; the sky icons above it scroll on (faded out by fold() in app.js).
+   It pins one readout row below the bar. --fold (0 → 1, set by fold()) then folds it
+   down as the page scrolls on: the bars halve, the readout of the picked hour fades in
+   in that row, and a line fades in underneath. The block
    reaches into the side gutters so the line runs the page’s width. Above the graphs
    (z-index 2) that scroll under it. */
-.hours { --fold: 0; position: sticky; z-index: 3;
-  top: calc(env(safe-area-inset-top) + var(--top-bar-height) + var(--day-dots-height));
+.hours { --fold: 0; --readout-height: 26px; position: sticky; z-index: 3;
+  top: calc(env(safe-area-inset-top) + var(--top-bar-height) + var(--day-dots-height) + var(--readout-height));
   margin: 0 calc(-1 * max(16px, env(safe-area-inset-right))) 0 calc(-1 * max(16px, env(safe-area-inset-left)));
   padding: 0 max(16px, env(safe-area-inset-right)) calc(20px - 8px * var(--fold)) max(16px, env(safe-area-inset-left));
   background: var(--page-color);
   box-shadow: 0 1px 0 color-mix(in srgb, var(--line-color), transparent calc(100% - 100% * var(--fold))); }
-.hours .fold { overflow: hidden; }
-/* The picked hour while the hero is out of sight: “Caution  NOW • Thu 19, 10 AM”. */
-.readout { display: flex; align-items: baseline; gap: 8px; margin: 0; overflow: hidden;
-  height: calc(26px * var(--fold)); opacity: var(--fold);
+/* The picked hour while the hero is out of sight: “Caution  NOW • Thu 19, 10 AM”. It sits
+   just above the block, outside it, so the block never clips it, and it never moves: it
+   only fades. Taps go through to whatever is under it. */
+.readout { position: absolute; z-index: 1; left: 0; right: 0; bottom: 100%; height: var(--readout-height);
+  display: flex; align-items: center; gap: 8px; margin: 0; pointer-events: none;
+  padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+  background: color-mix(in srgb, var(--page-color), transparent calc(100% - 100% * var(--fold)));
   color: var(--text-muted); font-size: 15px; font-weight: 500; white-space: nowrap; }
+.readout > * { opacity: var(--fold); }
 .readout .level { color: var(--chip-color); font-weight: 700; }
 
 /* One column per hour, colored by rating. Tap to select. */

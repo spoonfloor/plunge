@@ -281,17 +281,16 @@ function dayPanel(date, side) {
       return card;
     }));
 
-  // Pinned under the top bar once scrolled to (see fold()). The readout stands in for the
-  // hero, which has scrolled away by then; it shows only while the strip is pinned.
+  // The strip pins under the top bar once scrolled to (see fold()); the sky icons and rain
+  // graph above it scroll on and fade away. The readout stands in for the hero, which has
+  // scrolled away by then; it shows only while the strip is pinned.
   const readout = el("p", { class: "readout", "data-level": r.overall.level, "aria-hidden": "true" },
     el("span", { class: "level" }, LABELS[r.overall.level]), el("span", {}, whenNodes(date, selected)));
-  const pinned = el("div", { class: "hours" }, readout,
-    el("div", { class: "fold" }, skyRow,
-      state.rainOpen && hasRain ? el("div", { class: "rain" }, rainCurve(rain, hours, selected)) : null),
-    strip);
 
   return el("section", { class: "day", "aria-label": longDate(date), inert: side !== 0, "aria-hidden": side !== 0 ? "true" : null },
-    hero, pinned,
+    hero, skyRow,
+    state.rainOpen && hasRain ? el("div", { class: "rain" }, rainCurve(rain, hours, selected)) : null,
+    el("div", { class: "hours" }, readout, strip),
     summaryCard(hours),
     factors,
     advisories(date));
@@ -506,20 +505,26 @@ addEventListener("resize", () => {
 });
 
 // Once the hour strip pins under the top bar, the next FOLD_PX of scrolling fold it down:
-// the sky icons (and rain graph) close up, the bars halve and the readout opens. --fold
-// runs 0 → 1 with the scroll, so the fold tracks the finger instead of snapping. It’s
-// measured from the hero’s bottom, which the fold doesn’t move, so it never flickers.
+// the bars halve and the readout fades in above them. --fold runs 0 → 1 with the scroll,
+// so the fold tracks the finger instead of snapping. It’s measured from where the strip
+// would sit unpinned (just under whatever is above it), which the fold doesn’t move, so it
+// never flickers. Meanwhile the sky icons and rain graph scroll on and each fades out over
+// its last FADE_PX before reaching the top bar, gone before the readout fades in over them.
 // Only the day shown pins: the neighbors are 0 tall (see .day[inert]), so they can’t.
-const FOLD_PX = 40;
+const FOLD_PX = 40, FADE_PX = 32;
 function fold() {
   const day = $("track").children[1];
   const block = day?.querySelector(".hours");
   if (!block) return;
-  const past = parseFloat(getComputedStyle(block).top) - block.previousElementSibling.getBoundingClientRect().bottom;
-  const p = Math.min(1, Math.max(0, past / FOLD_PX));
+  const above = block.previousElementSibling;
+  const unpinnedTop = above.getBoundingClientRect().bottom + parseFloat(getComputedStyle(above).marginBottom);
+  const p = Math.min(1, Math.max(0, (parseFloat(getComputedStyle(block).top) - unpinnedTop) / FOLD_PX));
   block.style.setProperty("--fold", p.toFixed(3));
-  const sky = block.querySelector(".fold");
-  sky.style.height = p ? `${sky.scrollHeight * (1 - p)}px` : "";
+  const cut = $("top-bar").getBoundingClientRect().bottom;
+  for (const fading of day.querySelectorAll(".sky-row, .rain")) {
+    const o = Math.min(1, Math.max(0, (fading.getBoundingClientRect().top - cut) / FADE_PX));
+    fading.style.opacity = o < 1 ? o.toFixed(3) : "";
+  }
 }
 let foldQueued = false;
 addEventListener("scroll", () => {
