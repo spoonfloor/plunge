@@ -135,6 +135,9 @@ async function refresh() {
 const clampHour = h => Math.min(spot.lastHour, Math.max(spot.firstHour, h));
 const now = () => zonedParts(Date.now(), spot.timeZone);
 const selectedHour = () => state.selected ?? clampHour(now().hour);
+// The hour a day shows: the one it’ll have once it’s the day shown, so a day sliding in
+// doesn’t change hour as it lands. Coming back to today goes back to “now” (see show()).
+const hourOn = date => date === state.today && date !== state.date ? clampHour(now().hour) : selectedHour();
 function isPast(date, hour) {
   const n = now();
   return n.date === date && hour < n.hour;
@@ -221,7 +224,7 @@ function dayPanel(date, side) {
       el("p", {}, side < 0 ? "Nothing before yesterday" : "No forecast past here"));
   }
   const { hours, sky, tide, currents } = state.days[date];
-  const selected = selectedHour();
+  const selected = hourOn(date);
   const r = hours.find(h => h.hour === selected);
   const marks = driverMarks(r);
   const rain = rainPcts(sky, hours);
