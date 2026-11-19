@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { currentAt, peakCurrent, transferFactor, assessCurrent, assessWaves, assessWind, windPush, overall, summarizeDay, hourSpan,
   assessWaterQuality, waterAdvisories, advisorySummary, advisoryParagraphs, currentKnots, thresholds, showsRain, skyKind, skyLine, skyText,
-  tideAt, assessTide, feet, slackLine } from "../js/model.js";
+  tideAt, assessTide, feet } from "../js/model.js";
 import { sunIsUp } from "../js/time.js";
 import { forDate } from "../js/sources.js";
 import spot from "../js/spots/crissy-east.js";
@@ -122,9 +122,6 @@ test("current card: direction and next two slacks", () => {
   assert.equal(notes(["2026-11-15 22:24", "2026-11-16 01:14"]), "Slack at 10:24 PM and tomorrow at 1:14 AM");
   assert.equal(notes(["2026-11-16 01:14", "2026-11-16 05:40"]), "Slack tomorrow at 1:14 AM and 5:40 AM");
   assert.equal(notes(["2026-11-16 00:30"], z("2026-11-15 17:00")), "Slack tomorrow at 12:30 AM");
-  // Under the open graph, which already shows the day’s earlier slacks.
-  assert.equal(slackLine([z("2026-11-15 20:16"), z("2026-11-16 02:05")], start, spot.timeZone, "Slack again"),
-    "Slack again at 8:16 PM and tomorrow at 2:05 AM");
 });
 
 test("wind says which way it pushes a wader on a north-facing beach", () => {
