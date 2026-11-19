@@ -354,9 +354,10 @@ function select(hour) {
 // The day’s values for one factor: a line through the hours, dashed lines at the
 // caution and high thresholds with their numbers at the right end, and a dot at the
 // selected hour in its rating’s color. For the current, events (NOAA’s slacks and maxes)
-// draws the speed moment by moment instead, every 6 minutes, so it dips to 0 at each
-// slack, marked with an open circle. The dot then sits on that line at the start of the
-// hour, while its color and the card’s number are still the hour’s strongest current.
+// draws the speed moment by moment instead, every 6 minutes, so it dips to a dashed 0
+// line at each slack, marked with an open circle. The dot then sits on that line at the
+// start of the hour, while its color and the card’s number are still the hour’s
+// strongest current.
 function dayCurve(key, selected, hours, events = null) {
   const W = 300, H = 126, plotW = W - 34, top = 12, bottom = H - 22;
   const points = hours.map(h => ({ hour: h.hour, f: h.factors[key] }));
@@ -406,6 +407,11 @@ function dayCurve(key, selected, hours, events = null) {
   return svg("svg", { class: "curve", viewBox: `0 0 ${W} ${H}`, role: "img", ...scrubAttrs(key, 0, x(1)),
     "aria-label": `${FACTORS.find(f => f.key === key).name} through the day: ${points.map(p => `${hourLabel(p.hour)} ${p.f.value}`).join(", ")}` },
     line(th.caution, "caution"), line(th.high, "high"),
+    // The moment-by-moment current reaches 0 at slack: a dashed 0 line, as on the tide.
+    moments ? [
+      svg("line", { x1: 0, x2: plotW + 2, y1: y(0), y2: y(0), class: "guide" }),
+      svg("text", { x: plotW + 8, y: y(0), class: "guide-label", "dominant-baseline": "middle" }, "0"),
+    ] : null,
     runs.map(r => r.length > 1 ? svg("polyline", { points: r.join(" "), class: "trace" }) : null),
     (slacks ?? []).map(ms => svg("circle", { cx: x(indexAt(ms)), cy: y(0), r: 3.5, class: "turn" })),
     dotY != null ? svg("circle", { cx: x(si), cy: dotY, r: 5, class: "dot", "data-level": sel.f.level }) : null,
