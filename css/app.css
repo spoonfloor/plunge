@@ -258,6 +258,9 @@ main.first-load #loader {
 .curve .turn { fill: var(--surface-color); stroke: var(--text-muted); stroke-width: 1.5; }
 .curve .turn-label { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; fill: var(--text-muted); }
 .curve .dot.unrated { fill: var(--accent-fill); }
+/* The current graph shades the selected hour, since its dot sits at the hour’s strongest
+   moment rather than on the hour. */
+.curve .hour-band { fill: color-mix(in srgb, var(--text-color), transparent 93%); }
 .factor .value { margin: 2px 0 0; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em; }
 .factor .value + .note { margin-top: 6px; }

@@ -3,8 +3,8 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 
 import spot from "./spots/crissy-east.js";
 import { forDate, loadAll } from "./sources.js";
-import { advisoryParagraphs, advisorySummary, assessHour, feet, showsRain, skyKind, skyLine, summarizeDay, thresholds, tideAt,
-  waterAdvisories } from "./model.js";
+import { advisoryParagraphs, advisorySummary, assessHour, currentAt, feet, nextSlacks, showsRain, skyKind, skyLine, slackLine,
+  summarizeDay, thresholds, tideAt, waterAdvisories } from "./model.js";
 import { addDays, hourLabel, zonedParts, zonedToMs } from "./time.js";
 
 // The days you can swipe between: yesterday, today and five ahead. Five is as far as
@@ -117,7 +117,7 @@ async function refresh() {
         hours.push(assessHour(hour, zonedToMs(`${date} ${hour}:00`, spot.timeZone), day, spot));
       }
       // The forecast’s sky where it has the hour; what a station reported where it doesn’t.
-      return [date, { hours, sky: { ...day.skyObserved, ...day.sky }, tide: data.tide }];
+      return [date, { hours, sky: { ...day.skyObserved, ...day.sky }, tide: data.tide, currents: data.currents }];
     }));
     state.lastLoad = Date.now();
     renderStatus(sources);
@@ -207,7 +207,7 @@ function dayPanel(date, side) {
     return el("section", { class: `day end ${side < 0 ? "before" : "after"}`, inert: true, "aria-hidden": "true" },
       el("p", {}, side < 0 ? "Nothing before yesterday" : "No forecast past here"));
   }
-  const { hours, sky, tide } = state.days[date];
+  const { hours, sky, tide, currents } = state.days[date];
   const selected = selectedHour();
   const r = hours.find(h => h.hour === selected);
   const marks = driverMarks(r);
@@ -261,7 +261,9 @@ function dayPanel(date, side) {
       const f = r.factors[key];
       const rated = f.level in LABELS && f.level !== "unknown";
       const open = curve && state.open.has(key);
-      const graph = !open ? null : key === "tide" ? tideCurve(tide, date, selected, hours) : dayCurve(key, selected, hours);
+      const cur = open && key === "current" ? currentView(currents, date, selected, hours, f) : null;
+      const graph = !open ? null : key === "tide" ? tideCurve(tide, date, selected, hours) : cur?.graph ?? dayCurve(key, selected, hours);
+      const notes = cur?.notes ?? f.notes;
       const card = el("li", {
         class: ["factor", curve ? "expandable" : "", i > 0 && !curve && FACTORS[i - 1].curve ? "group-start" : ""].join(" ").trim(),
         "data-level": f.level,
@@ -272,7 +274,7 @@ function dayPanel(date, side) {
           el("span", { class: "rating" }, rated ? LABELS[f.level] : f.trend, curve ? el("span", { class: "chevron", "aria-hidden": "true" }) : null)),
         el("p", { class: "value" }, f.value),
         graph,
-        f.notes.map(n => el("p", { class: "note" }, n)),
+        notes.map(n => el("p", { class: "note" }, n)),
         latestOnly?.[key] && rated ? el("p", { class: "note" }, latestOnly[key]) : null);
       card.querySelector(".expand")?.addEventListener("click", () => {
         state.open.has(key) ? state.open.delete(key) : state.open.add(key);
@@ -437,6 +439,71 @@ function tideCurve(turns, date, selected, hours) {
     axis(0, hourLabel(first), "start"),
     nearEnd ? null : axis(x(selMs), hourLabel(selected), "middle"),
     axis(plotW, hourLabel(last), "end"));
+}
+
+// The day’s current at the beach, drawn like the tide: the speed every 6 minutes from the
+// first hour to the end of the last (each hour is rated on its strongest current, so
+// the last hour runs to its end), dipping to a dashed 0 at each slack, which is marked
+// with its time. The selected hour is shaded and its dot sits where its strongest
+// current falls, on the line. The caution and high lines are as on the other graphs.
+// Its notes: the direction, then only the slacks after the graph, since it shows the
+// rest. Null where the predictions don’t cover the day, for the plain hourly graph.
+function currentView(events, date, selected, hours, f) {
+  if (!events) return null;
+  const W = 300, H = 142, plotW = W - 34, top = 12, bottom = 104, STEP = 6 * 60e3, HOUR = 60 * 60e3;
+  const first = hours[0].hour;
+  const startMs = zonedToMs(`${date} ${first}:00`, spot.timeZone);
+  const endMs = zonedToMs(`${date} ${hours.at(-1).hour}:00`, spot.timeZone) + HOUR;
+  const beach = ms => { const v = currentAt(events, ms); return v === null ? null : Math.abs(v) * spot.current.nearshoreFactor; };
+  const samples = [];
+  for (let ms = startMs; ms <= endMs; ms += STEP) samples.push([ms, beach(ms)]);
+  if (samples.some(([, kn]) => kn === null)) return null;
+  const slacks = events.filter(e => e.knots === 0 && e.ms > startMs && e.ms < endMs).map(e => e.ms);
+  // Slacks fall between samples: add them so the line touches 0.
+  const line = [...samples, ...slacks.map(ms => [ms, 0])].sort((a, b) => a[0] - b[0]);
+
+  const th = THRESHOLDS.current;
+  const max = Math.max(th.high * 1.2, ...samples.map(([, kn]) => kn * 1.1));
+  const x = ms => ((ms - startMs) / (endMs - startMs)) * plotW;
+  const y = kn => bottom - (kn / max) * (bottom - top);
+  const step = plotW / hours.length;
+  const short = ms => clock(ms).replace(/\s?[AP]M$/, "");
+  const anchor = px => px < 40 ? "start" : px > plotW - 40 ? "end" : "middle";
+  const rule = (v, lineClass, labelClass, label) => [
+    svg("line", { x1: 0, x2: plotW + 2, y1: y(v), y2: y(v), class: lineClass }),
+    svg("text", { x: plotW + 8, y: y(v), class: labelClass, "dominant-baseline": "middle" }, label),
+  ];
+
+  // The selected hour’s strongest moment, sampled as the rating samples it.
+  const si = hours.findIndex(h => h.hour === selected);
+  const selMs = startMs + si * HOUR;
+  let peak = null;
+  if (si >= 0) for (let ms = selMs; ms <= selMs + HOUR; ms += STEP) if (!peak || beach(ms) > peak[1]) peak = [ms, beach(ms)];
+  const axis = (px, text, a) => svg("text", { x: px, y: H - 4, "text-anchor": a, class: "axis" }, text);
+  const nearEnd = x(selMs) < 44 || x(selMs) > plotW - 44;
+
+  const graph = svg("svg", { class: "curve current-curve", viewBox: `0 0 ${W} ${H}`, role: "img",
+    // Each hour owns the stretch to the next, so a touch picks the hour it lands in.
+    ...scrubAttrs("current", step / 2, step),
+    "aria-label": `Current through the day: ${hours.map(h => `${hourLabel(h.hour)} ${h.factors.current.value}`).join(", ")}. ${
+      slacks.length ? `Slack at ${slacks.map(clock).join(" and ")}` : "No slack in these hours"}` },
+    si >= 0 ? svg("rect", { x: x(selMs), y: top - 4, width: step, height: bottom - top + 4, class: "hour-band" }) : null,
+    rule(th.caution, "threshold caution", "threshold-label caution", th.caution.toFixed(1)),
+    rule(th.high, "threshold high", "threshold-label high", th.high.toFixed(1)),
+    rule(0, "guide", "guide-label", "0"),
+    svg("polyline", { points: line.map(([ms, kn]) => `${x(ms).toFixed(1)},${y(kn).toFixed(1)}`).join(" "), class: "trace" }),
+    slacks.flatMap(ms => [
+      svg("circle", { cx: x(ms), cy: y(0), r: 3.5, class: "turn" }),
+      svg("text", { x: x(ms), y: bottom + 16, "text-anchor": anchor(x(ms)), class: "turn-label" }, `Slack · ${short(ms)}`)]),
+    peak && f.amount != null ? svg("circle", { cx: x(peak[0]), cy: y(peak[1]), r: 5, class: "dot", "data-level": f.level }) : null,
+    axis(0, hourLabel(first), "start"),
+    nearEnd ? null : axis(x(selMs), hourLabel(selected), "middle"),
+    axis(plotW, hourLabel((hours.at(-1).hour + 1) % 24), "end"));
+
+  const later = nextSlacks(events, endMs);
+  const notes = !slacks.length ? f.notes
+    : [f.notes[0], later.length ? slackLine(later, startMs, spot.timeZone, "Slack again") : null].filter(Boolean);
+  return { graph, notes };
 }
 
 // ---- Chance of rain through the day ---------------------------------------------------

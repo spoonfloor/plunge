@@ -42,14 +42,15 @@ export function nextSlacks(events, ms, count = 2) {
 }
 
 // “Slack at 10:24 AM and tomorrow at 1:14 AM”. A day word shared by every slack comes
-// once, up front: “Slack tomorrow at 1:14 AM and 7:40 AM”.
-function slackLine(slacks, startMs, timeZone) {
+// once, up front: “Slack tomorrow at 1:14 AM and 7:40 AM”. lead replaces “Slack”, as in
+// “Slack again at 8:16 PM” under a graph that already shows the earlier ones.
+export function slackLine(slacks, startMs, timeZone, lead = "Slack") {
   const today = zonedParts(startMs, timeZone).date;
   const day = ms => zonedParts(ms, timeZone).date === today ? "" : "tomorrow ";
   const clock = ms => clockTime(ms, timeZone);
   return new Set(slacks.map(day)).size === 1
-    ? `Slack ${day(slacks[0])}at ${slacks.map(clock).join(" and ")}`
-    : `Slack ${slacks.map(ms => `${day(ms)}at ${clock(ms)}`).join(" and ")}`;
+    ? `${lead} ${day(slacks[0])}at ${slacks.map(clock).join(" and ")}`
+    : `${lead} ${slacks.map(ms => `${day(ms)}at ${clock(ms)}`).join(" and ")}`;
 }
 
 // Current thresholds as speed at the beach (knots, to the tenth shown on the card):
