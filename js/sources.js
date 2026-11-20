@@ -41,6 +41,7 @@ function byHour(series, spot, dates, map = v => v) {
   }
   return out;
 }
+const HOUR = 3600e3;
 const isEmpty = days => Object.values(days).every(hours => !Object.keys(hours).length);
 // Gridpoint weather types, most significant first.
 const WX_RANK = ["thunderstorms", "freezing_rain", "freezing_drizzle", "snow", "snow_showers", "rain",
@@ -289,14 +290,76 @@ const FETCHERS = {
       link: `https://tidesandcurrents.noaa.gov/stationhome.html?id=${station}` };
   },
 
+  // Rain by hour, measured where it has fallen and forecast after that, as one series:
+  // { startMs, inches: [one per hour from startMs], observedUntilMs, gauge }. It starts
+  // spot.rain.lookbackDays before the first day, so a day’s first hours can see the rain
+  // before them. Measured: SFO’s gauge through the server; Open-Meteo’s model where that
+  // fails. Forecast: the NWS gridpoint rainfall, each 6-hour total spread evenly over
+  // its hours; Open-Meteo where that fails.
+  async rain(spot, dates, shared) {
+    const startMs = zonedToMs(`${addDays(dates[0], -spot.rain.lookbackDays)} 00:00`, spot.timeZone);
+    const endMs = zonedToMs(`${addDays(dates.at(-1), 1)} 00:00`, spot.timeZone);
+    const inches = Array(Math.round((endMs - startMs) / HOUR)).fill(0);
+    const index = ms => Math.floor((ms - startMs) / HOUR);
+    let model;
+    const openMeteo = () => model ??= getJson(withQuery("https://api.open-meteo.com/v1/forecast", {
+      latitude: spot.lat, longitude: spot.lon, hourly: "precipitation", precipitation_unit: "inch",
+      timezone: "GMT", past_days: spot.rain.lookbackDays + 2, forecast_days: 8,
+    })).then(j => j.hourly.time.map((t, i) => ({ ms: Date.parse(`${t}:00Z`), in: j.hourly.precipitation[i] ?? 0 })));
+
+    let observedUntilMs, measured;
+    try {
+      const json = await getJson(`${SERVER}/rain`);
+      for (const h of json.hours) {
+        const i = index(Date.parse(h.time));
+        if (i >= 0 && i < inches.length) inches[i] = h.in;
+      }
+      // The hour after the last report: the first one nobody has measured yet.
+      const through = Date.parse(json.through);
+      observedUntilMs = through - through % HOUR + HOUR;
+      measured = `measured at ${spot.rain.stationName}`;
+    } catch {
+      observedUntilMs = Date.now() - Date.now() % HOUR;
+      for (const h of await openMeteo()) {
+        const i = index(h.ms);
+        if (i >= 0 && i < inches.length && h.ms < observedUntilMs) inches[i] = h.in;
+      }
+      measured = "modeled by Open-Meteo (SFO’s gauge didn’t load)";
+    }
+
+    let forecast = "NWS rainfall forecast";
+    const fill = (ms, amount) => {
+      const i = index(ms);
+      if (ms >= observedUntilMs && i >= 0 && i < inches.length) inches[i] = amount;
+    };
+    try {
+      const qpf = (await shared.nwsGrid()).properties.quantitativePrecipitation;
+      if (!qpf.values.length) throw new Error("No rainfall forecast");
+      for (const { validTime, value } of qpf.values) {
+        const [start, span] = validTime.split("/");
+        const [, d, h] = span.match(/P(?:(\d+)D)?T?(?:(\d+)H)?/).map(x => Number(x ?? 0));
+        const hours = d * 24 + h;
+        for (let k = 0; k < hours; k++) fill(Date.parse(start) + k * HOUR, value / 25.4 / hours);
+      }
+    } catch {
+      for (const h of await openMeteo()) fill(h.ms, h.in);
+      forecast = "Open-Meteo rainfall forecast";
+    }
+    return { data: { startMs, inches, observedUntilMs, gauge: spot.rain.stationName },
+      label: `Rain ${measured}, then the ${forecast}`,
+      link: `https://mesonet.agron.iastate.edu/sites/site.php?station=${spot.rain.station}&network=CA_ASOS` };
+  },
+
   // SFPUC beach postings, the feed behind https://webapps.sfpuc.org/sapps/beachesandbay.html.
-  // XML wrapping a JSON array of stations. A posting is today’s and only today’s: SFPUC
-  // doesn’t forecast, and the feed keeps no history, so past days come from the
-  // server’s record.
+  // XML wrapping a JSON array of stations. SFPUC doesn’t forecast, and the feed keeps no
+  // history: past days come from the server’s record, and days ahead carry today’s
+  // posting forward, marked carried, since a posting stands until SFPUC resamples. A
+  // posting also says when it began (since, from the server’s record), where known.
   async waterQuality(spot, dates, shared) {
     const today = zonedParts(Date.now(), spot.timeZone).date;
     const recorded = Object.fromEntries(await Promise.all(dates.filter(d => d < today).map(async date =>
       [date, await shared.history(date).then(h => h.waterQuality, () => null) ?? { status: "unrecorded" }])));
+    const sincePromise = getJson(`${SERVER}/posted-since`).catch(() => null);
     const res = await fetch("https://infrastructure.sfwater.org/lims.asmx/getBeaches");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const xml = await res.text();
@@ -307,17 +370,26 @@ const FETCHERS = {
     const station = JSON.parse(decoded).find(x => x.stationid === spot.waterQuality.station);
     if (!station) throw new Error(`Station ${spot.waterQuality.station} not in the feed`);
     const [m, d, y] = (station.sample_date ?? "").split("/").map(Number);
+    // Same rules as the SFPUC page: a red status, a posted sign or a sewer discharge
+    // means posted; yellow or white means not sampled. cso names the outfall that
+    // overflowed; any other posting is for bacteria.
+    const status = station.s_color === "R" || station.cso || (station.posted && ["R", "G"].includes(station.p_color)) ? "posted"
+      : station.s_color === "Y" || station.s_color === "W" ? "unsampled"
+      : "clean";
     const reading = {
-      // Same rules as the SFPUC page: a red status, a posted sign or a sewer
-      // discharge means posted; yellow or white means not sampled.
-      status: station.s_color === "R" || station.cso || (station.posted && ["R", "G"].includes(station.p_color)) ? "posted"
-        : station.s_color === "Y" || station.s_color === "W" ? "unsampled"
-        : "clean",
+      status,
+      ...(status === "posted" && { reason: station.cso ? "overflow" : "bacteria" }),
       sampled: m ? `20${String(y).padStart(2, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null,
     };
+    const since = await sincePromise;
+    // To the hour: the server records once an hour, a few minutes past.
+    const sinceMs = since?.status === status ? Date.parse(since.since) - Date.parse(since.since) % HOUR : null;
+    // The posting’s start applies to any day it covers: one that began before the day ended.
+    const withSince = (q, date) => q.status === "posted" && sinceMs && sinceMs < zonedToMs(`${addDays(date, 1)} 00:00`, spot.timeZone)
+      ? { ...q, sinceMs } : q;
     return {
-      data: Object.fromEntries(dates.map(date => [date,
-        date === today ? reading : recorded[date] ?? { status: "unforecast" }])),
+      data: Object.fromEntries(dates.map(date => [date, withSince(
+        date === today ? reading : recorded[date] ?? { ...reading, carried: true }, date)])),
       label: `SFPUC beach water quality, ${spot.waterQuality.stationName}`,
       link: "https://webapps.sfpuc.org/sapps/beachesandbay.html",
     };
@@ -342,7 +414,7 @@ const NAMES = {
   waterTemp: "NOAA water temperature", waves: "NWS nearshore wave forecast",
   wind: "National Weather Service hourly forecast", sky: "National Weather Service forecast",
   windObserved: "NOAA measured wind", skyObserved: "NWS observations",
-  waterQuality: "SFPUC beach water quality", alerts: "National Weather Service active alerts",
+  waterQuality: "SFPUC beach water quality", rain: "Rainfall", alerts: "National Weather Service active alerts",
 };
 // Sources that come back by day. The rest are one reading or list for every day.
 const BY_DAY = ["waves", "wind", "windObserved", "sky", "skyObserved", "waterTemp", "waterQuality"];
@@ -355,8 +427,9 @@ export function forDate(data, date) {
 }
 
 // The version goes up when a source’s data changes shape, so an old saved copy is never
-// read as the new one. v2: tide became a list of highs and lows.
-const cacheKey = (spot, key) => `plunge:v2:${spot.id}:${key}`;
+// read as the new one. v2: tide became a list of highs and lows. v3: water quality
+// carries today’s posting into days ahead.
+const cacheKey = (spot, key) => `plunge:v3:${spot.id}:${key}`;
 function readCache(spot, key, dates) {
   try {
     const saved = JSON.parse(localStorage.getItem(cacheKey(spot, key)));

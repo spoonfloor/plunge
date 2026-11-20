@@ -11,7 +11,8 @@
 // It also keeps a record of what sources forget: every hour, cron on the server calls
 // /collect, which saves the beach’s water quality posting (SFPUC keeps no history) and
 // the latest run’s wave height (runs vanish after about two days) to the
-// plunge.history table. /history?date= reads a past day back.
+// plunge.history table. /history?date= reads a past day back, and /posted-since says
+// how long the current posting has stood.
 
 import { nearestWater, readFields } from "./grib2.ts";
 
@@ -24,6 +25,10 @@ const ROUTES: Record<string, { cacheMs: number; load: () => Promise<unknown> }> 
   // A new wave run comes out about every 12 hours, some 7 hours after its start time.
   "waves": { cacheMs: 30 * 60e3, load: waves },
   "water-quality": { cacheMs: 10 * 60e3, load: waterQuality },
+  // SFO reports once an hour, at :56. The Iowa Environmental Mesonet is a volunteer
+  // service that limits how often one address asks, so every phone shares one copy.
+  "rain": { cacheMs: 30 * 60e3, load: rain },
+  "posted-since": { cacheMs: 10 * 60e3, load: postedSince },
 };
 const cache = new Map<string, { at: number; body: unknown }>();
 async function cached(route: string) {
@@ -78,10 +83,13 @@ async function waterQuality() {
   const station = JSON.parse(decoded).find((x: any) => x.stationid === "4612");
   if (!station) throw new Error("Station 4612 not in the SFPUC feed");
   const [m, d, y] = (station.sample_date ?? "").split("/").map(Number);
+  const status = station.s_color === "R" || station.cso || (station.posted && ["R", "G"].includes(station.p_color)) ? "posted"
+    : station.s_color === "Y" || station.s_color === "W" ? "unsampled"
+    : "clean";
   return {
-    status: station.s_color === "R" || station.cso || (station.posted && ["R", "G"].includes(station.p_color)) ? "posted"
-      : station.s_color === "Y" || station.s_color === "W" ? "unsampled"
-      : "clean",
+    status,
+    // cso names the outfall that overflowed; any other posting is for bacteria.
+    ...(status === "posted" && { reason: station.cso ? "overflow" : "bacteria" }),
     sampled: m ? `20${String(y).padStart(2, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null,
   };
 }
@@ -133,6 +141,37 @@ async function waves() {
 }
 const round4 = (x: number) => Math.round(x * 1e4) / 1e4;
 
+// Measured rain at SFO, the nearest NWS gauge to the beach (about 17 km south), by
+// hour for the last 8 days: the hourly METAR’s precipitation, from the Iowa
+// Environmental Mesonet’s archive. Each hour is the one a report at :56 closes.
+// A trace counts as none.
+async function rain() {
+  const start = new Date(Date.now() - 8 * 864e5), end = new Date(Date.now() + 864e5);
+  const ymd = (d: Date, n: number) => ({ [`year${n}`]: String(d.getUTCFullYear()),
+    [`month${n}`]: String(d.getUTCMonth() + 1), [`day${n}`]: String(d.getUTCDate()) });
+  const res = await fetch(`https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py?${new URLSearchParams({
+    station: "SFO", data: "p01i", tz: "UTC", format: "onlycomma", latlon: "no", report_type: "3",
+    ...ymd(start, 1), ...ymd(end, 2) })}`);
+  if (!res.ok) throw new Error(`Iowa Environmental Mesonet responded ${res.status}`);
+  const lines = (await res.text()).trim().split("\n");
+  if (!/^station,valid,p01i/.test(lines[0] ?? "")) throw new Error(`Unexpected response: ${lines[0]?.slice(0, 80)}`);
+  const byHour = new Map<string, number>();
+  let through = 0;
+  for (const line of lines.slice(1)) {
+    const [, valid, p01i] = line.split(",");
+    if (!valid || p01i === "M") continue;
+    const ms = Date.parse(`${valid.replace(" ", "T")}:00Z`);
+    byHour.set(new Date(ms - ms % 3600e3).toISOString(), p01i === "T" ? 0 : Number(p01i));
+    through = Math.max(through, ms);
+  }
+  if (!through) throw new Error("No rain reports from SFO");
+  return {
+    station: "SFO", name: "San Francisco International Airport",
+    hours: [...byHour].map(([time, inches]) => ({ time, in: inches })),
+    through: new Date(through).toISOString(),
+  };
+}
+
 // ---- History -------------------------------------------------------------------------
 
 // The local date and hour of an instant at the beach: { date: "2026-11-16", hour: 13 }.
@@ -181,6 +220,23 @@ async function collect() {
       headers: { Prefer: "resolution=merge-duplicates,return=minimal" } });
   }
   return { at: new Date().toISOString(), saved: rows.length, errors };
+}
+
+// When the current posting began: the first hour of the latest unbroken run of the
+// same status in the record, looking back 45 days. A run older than that reports the
+// oldest hour looked at, which is later than the truth but still a posting that old.
+async function postedSince() {
+  const from = local(Date.now() - 45 * 864e5).date;
+  const rows = await db(`?spot=eq.${SPOT}&kind=eq.waterQuality&date=gte.${from}` +
+    `&select=recorded_at,value&order=date.desc,hour.desc`) as { recorded_at: string; value: { status: string } }[];
+  const status = rows[0]?.value.status;
+  if (!status) throw new Error("No postings recorded");
+  let since = rows[0].recorded_at;
+  for (const r of rows) {
+    if (r.value.status !== status) break;
+    since = r.recorded_at;
+  }
+  return { status, since };
 }
 
 // A past day: the last posting recorded that day, the wave height by hour, and the

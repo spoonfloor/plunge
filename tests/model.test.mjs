@@ -78,34 +78,125 @@ test("day summary groups hours by rating and reason", () => {
   assert.equal(hourSpan(13, 18), "1–6 PM");
 });
 
-test("a posted beach is High every hour, even without current or wave data", () => {
-  const posted = assessWaterQuality({ status: "posted", sampled: "2026-11-09" });
-  assert.equal(posted.level, "high");
-  assert.equal(posted.value, "Hazardous");
-  const f = { current: { level: "unknown" }, waves: { level: "low" }, wind: { level: "low" },
-    waterTemp: { level: "low" }, waterQuality: posted };
-  assert.deepEqual(overall(f), { level: "high", drivers: ["waterQuality"], why: "SFPUC has posted this beach for bacteria or a sewer overflow. Don’t go in." });
-  // Other factors at caution or worse still show as reasons.
-  assert.deepEqual(overall({ ...f, current: { level: "caution" }, wind: { level: "high" } }).drivers, ["waterQuality", "current", "wind"]);
-  assert.equal(assessWaterQuality({ status: "clean", sampled: "2026-11-09" }).value, "OK");
-  assert.equal(assessWaterQuality({ status: "clean", sampled: "2026-11-09" }).level, "low");
-  assert.deepEqual(assessWaterQuality({ status: "clean", sampled: "2026-11-09" }).notes, ["Sampled Nov 9"]);
-  assert.equal(assessWaterQuality({ status: "unsampled", sampled: null }).level, "unknown");
-  assert.equal(assessWaterQuality(null).level, "unknown");
-  for (const status of ["unforecast", "unrecorded", undefined]) {
-    const q = assessWaterQuality({ status });
-    assert.equal(q.level, "unknown");
-    assert.equal(q.value, "Unavailable");
-  }
+// Water quality. Rain by hour from local midnight Nov 10, measured until 11 AM Nov 20
+// (Fri) and forecast after. Nov 9 is a Monday.
+const zq = t => zonedToMs(t, spot.timeZone);
+function rainSeries(at = {}, until = "2026-11-20 11:00") {
+  const startMs = zq("2026-11-10 00:00");
+  const inches = Array(24 * 20).fill(0);
+  for (const [t, v] of Object.entries(at)) inches[(zq(t) - startMs) / H] = v;
+  return { startMs, inches, observedUntilMs: zq(until), gauge: "SFO" };
+}
+const wq = (q, rain, t) => assessWaterQuality(q, rain, zq(t), spot);
+const dry = rainSeries();
+const clean = { status: "clean", sampled: "2026-11-09" };
+const bacteria = { status: "posted", reason: "bacteria", sampled: "2026-11-09" };
+const overflow = { status: "posted", reason: "overflow", sampled: "2026-11-18" };
+
+test("water quality: a clean sample stands for 8 days, through drizzle", () => {
+  assert.deepEqual(wq(clean, dry, "2026-11-12 10:00"), { level: "low", value: "OK", notes: ["Sampled Nov 9"] });
+  assert.equal(wq(clean, dry, "2026-11-17 09:00").level, "low");
+  assert.deepEqual(wq(clean, dry, "2026-11-17 10:00").notes, ["The last sample, Nov 9, is over a week old."]);
+  assert.equal(wq(clean, dry, "2026-11-17 10:00").level, "unknown");
+  assert.equal(wq(clean, rainSeries({ "2026-11-11 13:00": 0.05 }), "2026-11-11 15:00").level, "low");
 });
 
-test("a posting counts for today only", () => {
-  const day = (status, date) => forDate({ waterQuality: { [date]: { status } } }, date);
-  assert.equal(day("posted", "2026-11-17").waterQuality.status, "posted");
+test("water quality: light rain is a caution for 72 hours after it stops", () => {
+  const shower = rainSeries({ "2026-11-11 13:00": 0.2, "2026-11-11 14:00": 0.2 });
+  assert.equal(wq(clean, shower, "2026-11-11 12:00").level, "low");
+  const wet = wq(clean, shower, "2026-11-11 13:00");
+  assert.equal(wet.level, "caution");
+  assert.equal(wet.value, "Recent rain");
+  assert.deepEqual(wq(clean, shower, "2026-11-11 16:00").notes, ["0.40″ of rain at SFO. Rain washes runoff into the bay.",
+    "Until about Sat 3 PM.", "Last sample, Nov 9, was clean."]);
+  assert.equal(wq(clean, shower, "2026-11-14 14:00").level, "caution");
+  assert.equal(wq(clean, shower, "2026-11-14 15:00").level, "low");
+});
+
+test("water quality: heavy rain is a rain advisory, whatever the last sample said", () => {
+  const storm = rainSeries({ "2026-11-11 13:00": 0.3, "2026-11-11 14:00": 0.3 });
+  const r = wq(clean, storm, "2026-11-12 10:00");
+  assert.equal(r.level, "high");
+  assert.equal(r.value, "Rain advisory");
+  assert.equal(overall({ current: { level: "low" }, waves: { level: "low" }, wind: { level: "low" }, waterTemp: { level: "low" },
+    waterQuality: r }).why, "Heavy rain in the last 3 days overflows the sewers and washes runoff into the bay. Don’t go in.");
+  // With no posting or sampling, rain still rates the water.
+  assert.equal(wq(null, storm, "2026-11-12 10:00").level, "high");
+  assert.ok(wq({ status: "unsampled", sampled: null }, storm, "2026-11-12 10:00").notes.includes("SFPUC isn’t sampling this beach right now."));
+});
+
+test("water quality: forecast heavy rain is high up to 3 days out, caution past that", () => {
+  const soon = wq(clean, rainSeries({ "2026-11-22 10:00": 0.6 }), "2026-11-22 12:00");
+  assert.equal(soon.level, "high");
+  assert.deepEqual(soon.notes.slice(0, 3), ["0.60″ of rain forecast. Heavy rain overflows the sewers and washes runoff into the bay.",
+    "Until about Wed 11 AM.", "Estimate from the rain forecast."]);
+  const far = wq(clean, rainSeries({ "2026-11-25 10:00": 0.6 }), "2026-11-25 12:00");
+  assert.equal(far.level, "caution");
+  assert.equal(far.value, "Rain advisory");
+  // Nor does it restart a posting’s clock: an aged-out posting stays below High.
+  const aged = wq({ ...overflow, sinceMs: zq("2026-11-18 06:00") }, rainSeries({ "2026-11-18 09:00": 1, "2026-11-25 10:00": 0.6 }), "2026-11-25 12:00");
+  assert.equal(aged.level, "caution");
+  // Even when the posting’s start isn’t known: the measured storm still counts.
+  assert.equal(wq(overflow, rainSeries({ "2026-11-18 09:00": 1, "2026-11-25 10:00": 0.6 }), "2026-11-25 12:00").level, "caution");
+  assert.equal(wq(clean, rainSeries({ "2026-11-17 23:00": 0.2 }), "2026-11-18 10:00").notes[1], "Until about Fri midnight.");
+  // The amount is that rain’s own, not an earlier measured storm’s.
+  const after = wq(clean, rainSeries({ "2026-11-20 09:00": 0.4, "2026-11-21 17:00": 0.2 }), "2026-11-22 10:00");
+  assert.equal(after.notes[0], "0.20″ of rain forecast. Rain washes runoff into the bay.");
+});
+
+test("water quality: a bacteria posting is hazardous for 72 hours after the sample, then probably OK", () => {
+  const r = wq(bacteria, dry, "2026-11-12 08:00");
+  assert.equal(r.level, "high");
+  assert.deepEqual(r.notes, ["High bacteria. Don’t go in.", "Sampled Nov 9", "Probably clears at 9 AM, if no more heavy rain."]);
+  assert.equal(overall({ current: { level: "unknown" }, waves: { level: "low" }, wind: { level: "low" }, waterTemp: { level: "low" },
+    waterQuality: r }).why, "SFPUC has posted this beach for high bacteria. Don’t go in.");
+  assert.deepEqual(wq(bacteria, dry, "2026-11-12 09:00"), { level: "low", value: "Probably OK", notes: [
+    "SFPUC’s posting for high bacteria, from Nov 9, is still up. 3 days with no heavy rain since, so it has probably cleared.",
+    "SFPUC hasn’t resampled yet."] });
+});
+
+test("water quality: heavy rain restarts a posting’s clock, light rain doesn’t", () => {
+  const storm = rainSeries({ "2026-11-18 09:00": 1, "2026-11-20 09:00": 0.6 });
+  const since = { ...overflow, sinceMs: zq("2026-11-18 06:00") };
+  assert.deepEqual(wq(since, storm, "2026-11-20 12:00").notes.slice(2), ["Probably clears Mon 10 AM, if no more heavy rain."]);
+  assert.equal(wq(since, storm, "2026-11-23 09:00").value, "Hazardous");
+  assert.equal(wq(since, storm, "2026-11-23 10:00").value, "Probably OK");
+  // A forecast shower Saturday evening keeps it at caution, still naming the posting.
+  const shower = rainSeries({ "2026-11-18 09:00": 1, "2026-11-20 09:00": 0.6, "2026-11-21 17:00": 0.2 });
+  const r = wq(since, shower, "2026-11-23 10:00");
+  assert.equal(r.value, "Recent rain");
+  assert.equal(r.notes.at(-2), "Estimate from the rain forecast.");
+  assert.equal(r.notes.at(-1), "SFPUC’s posting for a sewer overflow, from Nov 18, is still up.");
+});
+
+test("water quality: a posting with nothing to count from never ages", () => {
+  // An overflow with no known start and no heavy rain on record.
+  assert.equal(wq(overflow, dry, "2026-11-30 10:00").value, "Hazardous");
+  // No rain data: there’s no telling whether rain restarted it.
+  const r = wq(bacteria, null, "2026-11-30 10:00");
+  assert.equal(r.value, "Hazardous");
+  assert.ok(r.notes.includes("Rainfall didn’t load."));
+  assert.deepEqual(wq(clean, null, "2026-11-12 10:00").notes, ["Sampled Nov 9", "Rainfall didn’t load."]);
+});
+
+test("water quality: days ahead carry today’s posting, marked as an estimate", () => {
+  assert.deepEqual(wq({ ...clean, carried: true }, dry, "2026-11-12 10:00").notes,
+    ["Sampled Nov 9", "Assumes today’s posting holds."]);
+});
+
+test("water quality: missing postings are unrated unless rain says otherwise", () => {
+  assert.deepEqual(wq(null, dry, "2026-11-12 10:00").notes, ["SFPUC water quality didn’t load."]);
+  for (const q of [{ status: "unrecorded" }, {}]) assert.deepEqual(wq(q, dry, "2026-11-12 10:00").notes, ["No record of this day’s posting."]);
+  assert.equal(wq({ status: "unsampled", sampled: null }, dry, "2026-11-12 10:00").level, "unknown");
+  // Other factors at caution or worse still show as reasons behind a posting.
+  const f = { current: { level: "caution" }, waves: { level: "low" }, wind: { level: "high" }, waterTemp: { level: "low" },
+    waterQuality: wq(overflow, dry, "2026-11-19 10:00") };
+  assert.deepEqual(overall(f).drivers, ["waterQuality", "current", "wind"]);
+});
+
+test("one day’s posting, out of a multi-day load", () => {
+  assert.equal(forDate({ waterQuality: { "2026-11-17": { status: "posted" } } }, "2026-11-17").waterQuality.status, "posted");
   assert.deepEqual(forDate({ waterQuality: { "2026-11-17": { status: "posted" } } }, "2026-11-18").waterQuality, {});
-  const f = { current: { level: "low" }, waves: { level: "low" }, wind: { level: "low" }, waterTemp: { level: "low" },
-    waterQuality: assessWaterQuality({ status: "unforecast" }) };
-  assert.equal(overall(f).level, "low");
 });
 
 test("current card: direction and next two slacks", () => {
