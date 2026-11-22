@@ -68,7 +68,8 @@ const SKY_ICONS = {
     svg("path", { d: "M12.5 15.5l-2 3.5h3l-2 3.5" })],
   fog: () => [svg("path", { d: "M4 8h16M3 12h18M5 16h14M8 20h8" })],
 };
-// What’s driving the selected hour’s rating, after the time on the Risk line: icons for
+// Every hazard active in the selected hour, after the time on the Risk line, all in the
+// rating’s color (each card has the factor’s own level): icons for
 // current, waves, wind and water quality (a drop with specks in it), the reading itself
 // for water temperature.
 const DRIVER_ICONS = {
@@ -81,7 +82,7 @@ const DRIVER_ICONS = {
 };
 function driverMarks(r) {
   if (r.overall.level !== "caution" && r.overall.level !== "high") return [];
-  return r.overall.drivers.map(k =>
+  return r.overall.active.map(k =>
     DRIVER_ICONS[k] ? svg("svg", { class: "driver-icon", viewBox: "0 0 24 24", "aria-hidden": "true" }, DRIVER_ICONS[k]())
     : k === "waterTemp" ? el("span", { class: "driver-temp", "aria-hidden": "true" }, r.factors.waterTemp.value.replace(/F$/, ""))
     : null).filter(Boolean);
@@ -237,7 +238,7 @@ function dayPanel(date, side) {
     el("p", { class: "hero-risk eyebrow" },
       el("span", {}, "Risk"),
       marks.length ? el("span", { class: "drivers", role: "img",
-        "aria-label": `because of ${r.overall.drivers.map(k => FACTORS.find(f => f.key === k)?.name.toLowerCase()).join(" and ")}` }, marks) : null),
+        "aria-label": `hazards: ${r.overall.active.map(k => FACTORS.find(f => f.key === k)?.name.toLowerCase()).join(" and ")}` }, marks) : null),
     el("p", { class: "level-word" }, LABELS[r.overall.level]),
     // The hour, then its sky: “NOW • Tue 17, 3 PM · Sunny”. The sky part opens the day’s
     // chance of rain, when the forecast has it.

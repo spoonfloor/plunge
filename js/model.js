@@ -444,29 +444,42 @@ const NAMES = { current: "current", waves: "waves", wind: "wind", waterTemp: "wa
 // Without these two there’s no honest rating: they’re what knocks a wader off their feet.
 const CRITICAL = ["current", "waves"];
 
+// drivers: the factors that set the level, named in the summary. active: every factor
+// at caution or worse, drivers first, shown as icons in the rating’s color, so a
+// hazard doesn’t drop out of view when something worse joins it.
 export function overall(factors) {
+  const scored = Object.keys(NAMES).filter(k => factors[k]?.level in RANK);
+  const atLeast = level => scored.filter(k => RANK[factors[k].level] >= RANK[level]);
+  const rated = (level, drivers, why) => ({ level, drivers, why,
+    active: level === "low" ? [] : [...drivers, ...atLeast("caution").filter(k => !drivers.includes(k))] });
+
   // A posted beach, or one just hit by heavy rain, is a no-go whatever the water is
   // doing. Anything else at caution or worse is still named, so the reasons don’t
   // vanish behind it.
   if (factors.waterQuality?.level === "high") {
-    const also = Object.keys(NAMES).filter(k => k !== "waterQuality" && RANK[factors[k]?.level] >= RANK.caution);
-    return { level: "high", drivers: ["waterQuality", ...also],
-      why: factors.waterQuality.why ?? "SFPUC has posted this beach for bacteria or a sewer overflow. Don’t go in." };
+    const also = atLeast("caution").filter(k => k !== "waterQuality");
+    return rated("high", ["waterQuality", ...also],
+      factors.waterQuality.why ?? "SFPUC has posted this beach for bacteria or a sewer overflow. Don’t go in.");
   }
+  // Missing data can hide a hazard but never cancels a known one: any factor at high
+  // still makes the hour high. Short of that, a low or caution could be a false
+  // all-clear, so the hour goes unrated.
   const missing = CRITICAL.filter(k => factors[k].level === "unknown");
-  if (missing.length) {
-    return { level: "unknown", drivers: missing, why: `No rating: ${missing.map(k => NAMES[k]).join(" and ")} data is missing.` };
+  const missingText = missing.map(k => NAMES[k]).join(" and ");
+  const high = atLeast("high");
+  if (missing.length && !high.length) {
+    return { level: "unknown", drivers: missing, active: [], why: `No rating: ${missingText} data is missing.` };
   }
-  const scored = Object.keys(NAMES).filter(k => factors[k]?.level in RANK);
   if (factors.current.level === "caution" && factors.waves.level === "caution") {
-    return { level: "high", drivers: ["current", "waves"],
-      why: "Current and wave surge are both moderate. Together they push harder than either alone." };
+    return rated("high", ["current", "waves"],
+      "Current and wave surge are both moderate. Together they push harder than either alone.");
   }
   const worst = Math.max(...scored.map(k => RANK[factors[k].level]));
   const level = Object.keys(RANK).find(l => RANK[l] === worst);
-  if (level === "low") return { level, drivers: [], why: "Nothing stands out." };
+  if (level === "low") return rated(level, [], "Nothing stands out.");
   const drivers = scored.filter(k => RANK[factors[k].level] === worst);
-  return { level, drivers, why: `Because of the ${list(drivers.map(k => NAMES[k]))}.` };
+  const why = `Because of the ${list(drivers.map(k => NAMES[k]))}.`;
+  return rated(level, drivers, missing.length ? `${why} No ${missingText} data.` : why);
 }
 
 // ---- The day in a sentence or three -------------------------------------------------

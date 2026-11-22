@@ -60,6 +60,23 @@ test("overall: worst factor, two cautions make high, missing criticals make no r
   assert.equal(overall(f("unknown", "low")).level, "unknown");
 });
 
+test("overall: a known high beats missing data, and every hazard is active", () => {
+  const f = (current, waves, wind, waterQuality = "low") => ({ current: { level: current }, waves: { level: waves },
+    wind: { level: wind }, waterTemp: { level: "unknown" }, waterQuality: { level: waterQuality } });
+  const noWaves = overall(f("low", "unknown", "high"));
+  assert.equal(noWaves.level, "high");
+  assert.deepEqual(noWaves.drivers, ["wind"]);
+  assert.equal(noWaves.why, "Because of the wind. No waves data.");
+  assert.equal(overall(f("low", "unknown", "caution")).level, "unknown");
+  assert.deepEqual(overall(f("low", "unknown", "caution")).active, []);
+  // A caution stays in view when something worse joins it; only the worst set the level.
+  const r = overall(f("high", "low", "low", "caution"));
+  assert.deepEqual(r.drivers, ["current"]);
+  assert.deepEqual(r.active, ["current", "waterQuality"]);
+  assert.deepEqual(overall(f("caution", "caution", "caution")).active, ["current", "waves", "wind"]);
+  assert.deepEqual(overall(f("low", "low", "low")).active, []);
+});
+
 test("local times convert in Los Angeles, across DST", () => {
   const tz = "America/Los_Angeles";
   assert.equal(new Date(zonedToMs("2026-11-15 06:09", tz)).toISOString(), "2026-11-15T14:09:00.000Z");

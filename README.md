@@ -6,7 +6,7 @@ Live at https://spoonfloor.github.io/plunge/. Install it from Safari with Share 
 
 ## How the rating works
 
-What knocks a chest-deep wader off their feet is moving water, so **current** and **waves** drive the rating. **Wind**, **water temperature** and **water quality** can raise it, and an SFPUC posting or heavy rain in the last 3 days makes it High no matter what. **Tide** has its own card, with the day’s highs and lows on its graph, but isn’t scored. Each factor is rated on the number its card shows (0.58 kn shows as 0.6 and is rated at the 0.6 line). An hour takes its worst factor’s level, and moderate current plus moderate waves together count as high. With no current or wave data, the hour gets no rating instead of a misleading one.
+What knocks a chest-deep wader off their feet is moving water, so **current** and **waves** drive the rating. **Wind**, **water temperature** and **water quality** can raise it, and an SFPUC posting or heavy rain in the last 3 days makes it High no matter what. **Tide** has its own card, with the day’s highs and lows on its graph, but isn’t scored. Each factor is rated on the number its card shows (0.58 kn shows as 0.6 and is rated at the 0.6 line). An hour takes its worst factor’s level, and moderate current plus moderate waves together count as high. With no current or wave data, the hour gets no rating instead of a misleading one, unless another factor is already High: missing data can hide a hazard but not cancel one. The Risk line shows an icon for every factor at Caution or worse, all in the hour’s color; each factor’s card has its own level.
 
 | Factor | Source | How it’s turned into a level |
 |---|---|---|
