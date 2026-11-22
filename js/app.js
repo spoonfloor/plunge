@@ -258,7 +258,9 @@ function dayPanel(date, side) {
   hero.querySelector(".rain-toggle")?.addEventListener("click", toggleRain);
 
   const skyRow = el("div", { class: "sky-row", "aria-hidden": "true", style: `--hours: ${hours.length}` },
-    hours.map(h => el("span", { class: isPast(date, h.hour) ? "past" : null }, sky[h.hour] ? skyIcon(sky[h.hour]) : null)));
+    hours.map(h => el("span", { class: isPast(date, h.hour) ? "past" : null },
+      sky[h.hour]?.tempF != null ? el("span", { class: "air-temp" }, `${sky[h.hour].tempF}°`) : null,
+      sky[h.hour] ? skyIcon(sky[h.hour]) : null)));
 
   const strip = el("div", { class: "strip", role: "group", "aria-label": "Pick an hour", style: `--hours: ${hours.length}` },
     hours.map(h => {

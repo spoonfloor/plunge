@@ -42,6 +42,8 @@ function byHour(series, spot, dates, map = v => v) {
   return out;
 }
 const HOUR = 3600e3;
+// Whole degrees Fahrenheit from NWS Celsius, or null when there’s no reading.
+const fahrenheit = c => c == null ? null : Math.round(c * 9 / 5 + 32);
 
 // A forecast total over several hours, spread the way SFO’s gauge records rain: in
 // hundredths of an inch, as evenly as hundredths allow, so the total holds and every
@@ -229,7 +231,7 @@ const FETCHERS = {
       link: `https://forecast.weather.gov/MapClick.php?lat=${spot.lat}&lon=${spot.lon}` };
   },
 
-  // Sky and chance of rain by hour, from the NWS gridpoint forecast that the hourly
+  // Sky, chance of rain and air temperature by hour, from the NWS gridpoint forecast that the hourly
   // forecast is built from. Both drop hours once they pass, though the gridpoint one
   // sometimes keeps a few: those past hours get a sky as forecast for them, and
   // skyObserved fills the rest.
@@ -237,6 +239,7 @@ const FETCHERS = {
     const grid = (await shared.nwsGrid()).properties;
     const cover = byHour(grid.skyCover.values, spot, dates);
     const rainPct = byHour(grid.probabilityOfPrecipitation.values, spot, dates);
+    const tempF = byHour(grid.temperature.values, spot, dates, fahrenheit);
     // The weather that matters most when an hour lists more than one.
     const wx = byHour(grid.weather.values, spot, dates, v => v.filter(w => w.weather)
       .sort((a, b) => WX_RANK.indexOf(a.weather) - WX_RANK.indexOf(b.weather))[0] ?? null);
@@ -246,7 +249,8 @@ const FETCHERS = {
         if (cover[date][hour] == null) continue;
         const day = sunIsUp(zonedToMs(`${date} ${String(hour).padStart(2, "0")}:30`, spot.timeZone), spot.lat, spot.lon);
         const w = wx[date][hour] && { coverage: wx[date][hour].coverage, weather: wx[date][hour].weather, intensity: wx[date][hour].intensity };
-        data[date][hour] = { text: skyText({ cover: cover[date][hour], wx: w, day }), rainPct: rainPct[date][hour] ?? 0, day };
+        data[date][hour] = { text: skyText({ cover: cover[date][hour], wx: w, day }), rainPct: rainPct[date][hour] ?? 0, day,
+          tempF: tempF[date][hour] ?? null };
       }
     }
     // For hours the hourly forecast covers, its own words and day/night win: NWS’s cover
@@ -256,15 +260,16 @@ const FETCHERS = {
     for (const p of hourly?.properties.periods ?? []) {
       const at = zonedParts(Date.parse(p.startTime), spot.timeZone);
       if (!data[at.date]?.[at.hour]) continue;
-      data[at.date][at.hour] = { text: p.shortForecast, rainPct: p.probabilityOfPrecipitation?.value ?? 0, day: p.isDaytime };
+      data[at.date][at.hour] = { text: p.shortForecast, rainPct: p.probabilityOfPrecipitation?.value ?? 0, day: p.isDaytime,
+        tempF: p.temperatureUnit === "C" ? fahrenheit(p.temperature) : p.temperature ?? null };
     }
     if (isEmpty(data)) throw new Error("No hours in the gridpoint forecast");
     return { data, label: "National Weather Service forecast",
       link: `https://forecast.weather.gov/MapClick.php?lat=${spot.lat}&lon=${spot.lon}` };
   },
 
-  // The sky as reported by the nearest NWS station that reports it, for hours the
-  // forecast has already dropped (yesterday, mostly). Each hour takes the report
+  // The sky and air temperature as reported by the nearest NWS station that reports
+  // them, for hours the forecast has already dropped (yesterday, mostly). Each hour takes the report
   // nearest its half past.
   async skyObserved(spot, dates) {
     const { station, stationName } = spot.skyObserved;
@@ -277,7 +282,8 @@ const FETCHERS = {
       const at = zonedParts(ms, spot.timeZone);
       if (!data[at.date] || offBy[at.date][at.hour] <= Math.abs(at.minute - 30)) continue;
       offBy[at.date][at.hour] = Math.abs(at.minute - 30);
-      data[at.date][at.hour] = { text: p.textDescription, day: sunIsUp(ms, spot.lat, spot.lon), observed: stationName };
+      data[at.date][at.hour] = { text: p.textDescription, day: sunIsUp(ms, spot.lat, spot.lon), observed: stationName,
+        tempF: fahrenheit(p.temperature?.value) };
     }
     if (isEmpty(data)) throw new Error("No sky reports");
     return { data, label: `NWS observations, ${stationName} (${station})`,
@@ -440,8 +446,8 @@ export function forDate(data, date) {
 
 // The version goes up when a source’s data changes shape, so an old saved copy is never
 // read as the new one. v2: tide became a list of highs and lows. v3: water quality
-// carries today’s posting into days ahead.
-const cacheKey = (spot, key) => `plunge:v3:${spot.id}:${key}`;
+// carries today’s posting into days ahead. v4: each hour’s sky carries its air temperature.
+const cacheKey = (spot, key) => `plunge:v4:${spot.id}:${key}`;
 function readCache(spot, key, dates) {
   try {
     const saved = JSON.parse(localStorage.getItem(cacheKey(spot, key)));
