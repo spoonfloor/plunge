@@ -68,9 +68,8 @@ const SKY_ICONS = {
     svg("path", { d: "M12.5 15.5l-2 3.5h3l-2 3.5" })],
   fog: () => [svg("path", { d: "M4 8h16M3 12h18M5 16h14M8 20h8" })],
 };
-// Every hazard active in the selected hour, after the time on the Risk line, all in the
-// rating’s color (each card has the factor’s own level): icons for
-// current, waves, wind and water quality (a drop with specks in it), the reading itself
+// Every hazard active in the selected hour, after the time on the Risk line, each in its
+// own level’s color, worst first: icons for current, waves, wind and water quality (a drop with specks in it), the reading itself
 // for water temperature.
 const DRIVER_ICONS = {
   waterQuality: () => [svg("path", { d: "M12 3c-3.3 4.2-6.2 7.6-6.2 11a6.2 6.2 0 0 0 12.4 0C18.2 10.6 15.3 7.2 12 3z" }),
@@ -82,11 +81,18 @@ const DRIVER_ICONS = {
 };
 function driverMarks(r) {
   if (r.overall.level !== "caution" && r.overall.level !== "high") return [];
-  return r.overall.active.map(k =>
-    DRIVER_ICONS[k] ? svg("svg", { class: "driver-icon", viewBox: "0 0 24 24", "aria-hidden": "true" }, DRIVER_ICONS[k]())
-    : k === "waterTemp" ? el("span", { class: "driver-temp", "aria-hidden": "true" }, r.factors.waterTemp.value.replace(/F$/, ""))
+  return r.overall.active.map(({ key, level }) =>
+    DRIVER_ICONS[key] ? svg("svg", { class: "driver-icon", viewBox: "0 0 24 24", "data-level": level, "aria-hidden": "true" },
+      DRIVER_ICONS[key]())
+    : key === "waterTemp" ? el("span", { class: "driver-temp", "data-level": level, "aria-hidden": "true" },
+      r.factors.waterTemp.value.replace(/F$/, ""))
     : null).filter(Boolean);
 }
+// “high: current, waves; caution: water quality”
+const hazardsLabel = active => ["high", "caution"].map(level => {
+  const names = active.filter(a => a.level === level).map(a => FACTORS.find(f => f.key === a.key)?.name.toLowerCase());
+  return names.length ? `${level}: ${names.join(", ")}` : null;
+}).filter(Boolean).join("; ");
 
 const skyIcon = sky => svg("svg", { class: "sky-icon", viewBox: "0 0 24 24", "aria-hidden": "true" }, SKY_ICONS[skyKind(sky)]());
 
@@ -238,7 +244,7 @@ function dayPanel(date, side) {
     el("p", { class: "hero-risk eyebrow" },
       el("span", {}, "Risk"),
       marks.length ? el("span", { class: "drivers", role: "img",
-        "aria-label": `hazards: ${r.overall.active.map(k => FACTORS.find(f => f.key === k)?.name.toLowerCase()).join(" and ")}` }, marks) : null),
+        "aria-label": hazardsLabel(r.overall.active) }, marks) : null),
     el("p", { class: "level-word" }, LABELS[r.overall.level]),
     // The hour, then its sky: “NOW • Tue 17, 3 PM · Sunny”. The sky part opens the day’s
     // chance of rain, when the forecast has it.

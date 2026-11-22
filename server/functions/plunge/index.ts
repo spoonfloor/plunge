@@ -144,7 +144,8 @@ const round4 = (x: number) => Math.round(x * 1e4) / 1e4;
 // Measured rain at SFO, the nearest NWS gauge to the beach (about 17 km south), by
 // hour for the last 8 days: the hourly METAR’s precipitation, from the Iowa
 // Environmental Mesonet’s archive. Each hour is the one a report at :56 closes.
-// A trace counts as none.
+// A trace counts as none: the archive sends it as 0.0001 (or T), below the 0.01″ the
+// gauge can measure.
 async function rain() {
   const start = new Date(Date.now() - 8 * 864e5), end = new Date(Date.now() + 864e5);
   const ymd = (d: Date, n: number) => ({ [`year${n}`]: String(d.getUTCFullYear()),
@@ -161,7 +162,8 @@ async function rain() {
     const [, valid, p01i] = line.split(",");
     if (!valid || p01i === "M") continue;
     const ms = Date.parse(`${valid.replace(" ", "T")}:00Z`);
-    byHour.set(new Date(ms - ms % 3600e3).toISOString(), p01i === "T" ? 0 : Number(p01i));
+    const inches = p01i === "T" ? 0 : Number(p01i);
+    byHour.set(new Date(ms - ms % 3600e3).toISOString(), inches < 0.01 ? 0 : inches);
     through = Math.max(through, ms);
   }
   if (!through) throw new Error("No rain reports from SFO");

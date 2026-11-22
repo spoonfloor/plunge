@@ -114,11 +114,13 @@ main.first-load #loader {
 /* 11px on top, plus the Risk line’s half-leading, puts its capitals where the comment on
    #days says. */
 .hero { padding: 11px 0 16px; }
-/* Risk, then what’s driving the rating, in the rating’s color. The line is as tall as
+/* Risk, then every hazard in the hour, each in its own level’s color. The line is as tall as
    the icons, so a rating with drivers sits exactly where one without does. */
 .hero-risk { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 2px;
   line-height: 20px; }
-.hero-risk .drivers { display: flex; align-items: center; gap: 6px; color: var(--chip-color); }
+.hero-risk .drivers { display: flex; align-items: center; gap: 6px; }
+/* Each in its own level’s color: its data-level sets --chip-color. */
+.driver-icon, .driver-temp { color: var(--chip-color); }
 .driver-icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8;
   stroke-linecap: round; stroke-linejoin: round; }
 .driver-icon .dots { stroke-width: 2.4; }

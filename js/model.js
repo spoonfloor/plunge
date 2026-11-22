@@ -445,13 +445,17 @@ const NAMES = { current: "current", waves: "waves", wind: "wind", waterTemp: "wa
 const CRITICAL = ["current", "waves"];
 
 // drivers: the factors that set the level, named in the summary. active: every factor
-// at caution or worse, drivers first, shown as icons in the rating’s color, so a
-// hazard doesn’t drop out of view when something worse joins it.
+// at caution or worse as { key, level }, shown as icons in their own level’s color so
+// a hazard doesn’t drop out of view when something worse joins it. Worst first; within
+// a level, drivers first, then card order. levels: a driver’s level where it isn’t
+// its own, as when two moderates together make high.
 export function overall(factors) {
   const scored = Object.keys(NAMES).filter(k => factors[k]?.level in RANK);
   const atLeast = level => scored.filter(k => RANK[factors[k].level] >= RANK[level]);
-  const rated = (level, drivers, why) => ({ level, drivers, why,
-    active: level === "low" ? [] : [...drivers, ...atLeast("caution").filter(k => !drivers.includes(k))] });
+  const rated = (level, drivers, why, levels = {}) => ({ level, drivers, why,
+    active: level === "low" ? [] : [...drivers, ...atLeast("caution").filter(k => !drivers.includes(k))]
+      .map(key => ({ key, level: levels[key] ?? factors[key].level }))
+      .sort((a, b) => RANK[b.level] - RANK[a.level]) });
 
   // A posted beach, or one just hit by heavy rain, is a no-go whatever the water is
   // doing. Anything else at caution or worse is still named, so the reasons don’t
@@ -472,7 +476,8 @@ export function overall(factors) {
   }
   if (factors.current.level === "caution" && factors.waves.level === "caution") {
     return rated("high", ["current", "waves"],
-      "Current and wave surge are both moderate. Together they push harder than either alone.");
+      "Current and wave surge are both moderate. Together they push harder than either alone.",
+      { current: "high", waves: "high" });
   }
   const worst = Math.max(...scored.map(k => RANK[factors[k].level]));
   const level = Object.keys(RANK).find(l => RANK[l] === worst);

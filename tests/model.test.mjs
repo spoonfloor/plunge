@@ -60,7 +60,7 @@ test("overall: worst factor, two cautions make high, missing criticals make no r
   assert.equal(overall(f("unknown", "low")).level, "unknown");
 });
 
-test("overall: a known high beats missing data, and every hazard is active", () => {
+test("overall: a known high beats missing data, and every hazard is active at its level", () => {
   const f = (current, waves, wind, waterQuality = "low") => ({ current: { level: current }, waves: { level: waves },
     wind: { level: wind }, waterTemp: { level: "unknown" }, waterQuality: { level: waterQuality } });
   const noWaves = overall(f("low", "unknown", "high"));
@@ -72,8 +72,12 @@ test("overall: a known high beats missing data, and every hazard is active", () 
   // A caution stays in view when something worse joins it; only the worst set the level.
   const r = overall(f("high", "low", "low", "caution"));
   assert.deepEqual(r.drivers, ["current"]);
-  assert.deepEqual(r.active, ["current", "waterQuality"]);
-  assert.deepEqual(overall(f("caution", "caution", "caution")).active, ["current", "waves", "wind"]);
+  assert.deepEqual(r.active, [{ key: "current", level: "high" }, { key: "waterQuality", level: "caution" }]);
+  // Two moderates that together make high show as high; worst first, then card order.
+  assert.deepEqual(overall(f("caution", "caution", "caution")).active,
+    [{ key: "current", level: "high" }, { key: "waves", level: "high" }, { key: "wind", level: "caution" }]);
+  assert.deepEqual(overall(f("low", "caution", "high", "caution")).active,
+    [{ key: "wind", level: "high" }, { key: "waves", level: "caution" }, { key: "waterQuality", level: "caution" }]);
   assert.deepEqual(overall(f("low", "low", "low")).active, []);
 });
 
