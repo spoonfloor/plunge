@@ -282,10 +282,6 @@ function dayPanel(date, side) {
       return button;
     }));
 
-  // Water temperature is a reading, not a forecast: days ahead show today’s, and say so.
-  const latestOnly = date > state.today && {
-    waterTemp: "Today’s reading. There’s no forecast for water temperature.",
-  };
   const factors = el("ul", { class: "factors", "aria-label": "Factors for the selected hour" },
     FACTORS.map(({ key, name, curve, linkTo }, i) => {
       const f = r.factors[key];
@@ -306,8 +302,7 @@ function dayPanel(date, side) {
           el("span", { class: "rating" }, rated ? LABELS[f.level] : f.trend, curve ? el("span", { class: "chevron", "aria-hidden": "true" }) : null)),
         el("p", { class: "value" }, f.value),
         graph,
-        f.notes.map(n => el("p", { class: "note" }, n)),
-        latestOnly?.[key] && rated ? el("p", { class: "note" }, latestOnly[key]) : null);
+        f.notes.map(n => el("p", { class: "note" }, n)));
       card.querySelector(".expand")?.addEventListener("click", () => {
         state.open.has(key) ? state.open.delete(key) : state.open.add(key);
         render();

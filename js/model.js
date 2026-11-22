@@ -172,10 +172,12 @@ export function assessWind(wind, spot) {
     notes: [windPush(wind.dir, spot.shoreFacingDeg)].filter(Boolean) };
 }
 
+// temp.estimate: a day ahead, carrying today’s reading.
 export function assessWaterTemp(temp, spot) {
   if (!temp) return unknown("No water temperature reading for this hour.");
   const level = temp.f < spot.thresholds.waterTempF.caution ? "caution" : "low";
-  return { level, value: `${Math.round(temp.f)}°F`, notes: [] };
+  return { level, value: `${temp.estimate ? "~" : ""}${Math.round(temp.f)}°F`,
+    notes: temp.estimate ? ["Based on today’s reading. No forecast available."] : [] };
 }
 
 // ---- Water quality ----------------------------------------------------------------

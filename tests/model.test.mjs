@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { currentAt, peakCurrent, transferFactor, assessCurrent, assessWaves, assessWind, windPush, overall, summarizeDay, hourSpan,
   assessWaterQuality, waterAdvisories, advisorySummary, advisoryParagraphs, currentKnots, thresholds, showsRain, skyKind, skyLine, skyText,
-  tideAt, assessTide, feet, partOfDay } from "../js/model.js";
+  tideAt, assessTide, feet, partOfDay, assessWaterTemp } from "../js/model.js";
 import { sunIsUp } from "../js/time.js";
 import { forDate, spreadRain } from "../js/sources.js";
 import spot from "../js/spots/crissy-east.js";
@@ -396,4 +396,10 @@ test("tide: half a cosine between highs and lows, unrated, with the next turn", 
   const f = { current: { level: "low" }, waves: { level: "low" }, wind: { level: "low" }, waterTemp: { level: "low" },
     tide: t, waterQuality: { level: "low" } };
   assert.equal(overall(f).level, "low");
+});
+
+test("a day ahead marks today’s water temperature as an estimate, still rated", () => {
+  assert.deepEqual(assessWaterTemp({ f: 61.6 }, spot), { level: "low", value: "62°F", notes: [] });
+  assert.deepEqual(assessWaterTemp({ f: 47.2, estimate: true }, spot),
+    { level: "caution", value: "~47°F", notes: ["Based on today’s reading. No forecast available."] });
 });

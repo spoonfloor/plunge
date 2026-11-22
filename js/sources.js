@@ -163,7 +163,8 @@ const FETCHERS = {
   },
 
   // By day and hour. Past days get each hour’s own reading; today and the days ahead
-  // get the latest reading, since there’s no forecast for water temperature.
+  // get the latest reading, since there’s no forecast for water temperature. On days
+  // ahead it’s marked as an estimate.
   async waterTemp(spot, dates, shared) {
     const today = zonedParts(Date.now(), spot.timeZone).date;
     const data = byDay(dates);
@@ -172,7 +173,8 @@ const FETCHERS = {
     try { latest = await latestWaterTemp(spot); } catch (err) { latestError = err; }
     for (const date of dates) {
       if (date < today || !latest) continue;
-      for (let hour = spot.firstHour; hour <= spot.lastHour; hour++) data[date][hour] = latest.data;
+      const reading = date > today ? { ...latest.data, estimate: true } : latest.data;
+      for (let hour = spot.firstHour; hour <= spot.lastHour; hour++) data[date][hour] = reading;
     }
     const pastFound = (await Promise.all(past.map(date => pastWaterTemp(spot, date, shared, data[date])))).some(Boolean);
     if (!latest && !pastFound) throw latestError;
