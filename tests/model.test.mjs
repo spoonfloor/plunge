@@ -155,13 +155,26 @@ test("water quality: forecast heavy rain is a warning up to 3 days out, an advis
   assert.equal(far.value, "Recent rain");
   assert.equal(far.notes[0], "Advisory until Saturday morning.");
   // An advisory lasts through the lighter rain after the heavy, too.
-  assert.equal(wq(recent, rainSeries({ "2026-11-25 10:00": 0.6, "2026-11-26 20:00": 0.15 }), "2026-11-25 12:00").notes[0],
+  assert.equal(wq(recent, rainSeries({ "2026-11-25 10:00": 0.6, "2026-11-26 20:00": 0.25 }), "2026-11-25 12:00").notes[0],
     "Advisory until Sunday evening.");
   // Nor does it restart a posting’s clock: an aged-out posting stays below High.
   const aged = wq({ ...overflow, sinceMs: zq("2026-11-18 06:00") }, rainSeries({ "2026-11-18 09:00": 1, "2026-11-25 10:00": 0.6 }), "2026-11-25 12:00");
   assert.equal(aged.level, "caution");
   // Even when the posting’s start isn’t known: the measured storm still counts.
   assert.equal(wq(overflow, rainSeries({ "2026-11-18 09:00": 1, "2026-11-25 10:00": 0.6 }), "2026-11-25 12:00").level, "caution");
+});
+
+test("water quality: a clean sample taken after the rain clears it", () => {
+  const storm = rainSeries({ "2026-11-18 09:00": 1, "2026-11-19 09:00": 0.6, "2026-11-20 08:00": 0.3 });
+  const after = { status: "clean", sampled: "2026-11-20" }; // taken at 9 AM, after the last hour of rain
+  assert.deepEqual(wq(after, storm, "2026-11-20 12:00"), { level: "low", value: "OK", notes: ["Last sample, Nov 20, was clean."] });
+  // A sample from before the storm doesn’t.
+  assert.equal(wq({ status: "clean", sampled: "2026-11-17" }, storm, "2026-11-20 12:00").value, "Heavy rain");
+  // Rain after the sample counts again.
+  const more = rainSeries({ "2026-11-18 09:00": 1, "2026-11-21 14:00": 0.3 });
+  assert.equal(wq(after, more, "2026-11-21 16:00").value, "Recent rain");
+  // Under 0.2″ in a day isn’t enough to wash runoff in.
+  assert.equal(wq(after, rainSeries({ "2026-11-21 14:00": 0.15 }), "2026-11-21 16:00").value, "OK");
 });
 
 test("water quality: a bacteria posting is a warning for 72 hours after the sample, then OK", () => {
@@ -176,7 +189,10 @@ test("water quality: a bacteria posting is a warning for 72 hours after the samp
 test("water quality: heavy rain restarts a posting’s clock, light rain doesn’t", () => {
   const storm = rainSeries({ "2026-11-18 09:00": 1, "2026-11-20 09:00": 0.6 });
   const since = { ...overflow, sinceMs: zq("2026-11-18 06:00") };
-  assert.deepEqual(wq(since, storm, "2026-11-20 12:00").notes, ["Warning until Monday morning.", "Posted Nov 18 for a sewer overflow."]);
+  // Through today, SFPUC’s daily sampling decides; on days ahead the clock runs.
+  assert.deepEqual(wq(since, storm, "2026-11-20 12:00").notes, ["Warning until SFPUC resamples.", "Posted Nov 18 for a sewer overflow."]);
+  assert.equal(wq(since, storm, "2026-11-19 12:00").value, "Hazardous");
+  assert.deepEqual(wq(since, storm, "2026-11-21 12:00").notes, ["Warning until Monday morning.", "Posted Nov 18 for a sewer overflow."]);
   assert.equal(wq(since, storm, "2026-11-23 09:00").value, "Hazardous");
   assert.equal(wq(since, storm, "2026-11-23 10:00").value, "OK");
   // A forecast shower Saturday evening makes it an advisory, still naming the posting.

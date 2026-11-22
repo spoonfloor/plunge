@@ -69,21 +69,25 @@ export default {
     station: "4612", stationName: "Crissy Field Beach East",
     // A clean sample stands for a weekly cycle plus a day for the lab.
     cleanForDays: 8,
-    // A posting is a sample’s finding; with no heavy rain since, it’s taken to have
-    // cleared this long after the sample (or after the overflow began). Local guidance.
+    // A bacteria posting is a weekly sample’s finding; with no heavy rain since, it’s
+    // taken to have cleared this long after the sample. (Overflow postings are
+    // resampled daily, so they stand until SFPUC lifts them.)
     postingHours: 72,
     // SFPUC doesn’t say when it sampled, only the day. Mornings, by its schedule.
     sampleHour: 9,
   },
 
   // Rain washes runoff into the bay, and heavy rain overflows SF’s combined sewers.
-  // Local guidance: stay out for 72 hours after rain. The gauge is SFO’s, about 17 km
+  // California guidance (state Ocean Protection Council; LA, San Diego, SLO, Ventura
+  // counties): stay out for 72 hours after rain ends. SF gives no number, only “during
+  // and immediately after rain events”. The gauge is SFO’s, about 17 km
   // south, the nearest that reports by the hour.
   rain: {
     station: "SFO", stationName: "SFO",
-    // Inches in any 24 hours. Light rain brings runoff (caution); heavy rain is when
-    // the sewers overflow (high). Uncalibrated, set to err toward fewer red days.
-    cautionIn: 0.1, highIn: 0.5,
+    // Inches in any 24 hours. Enough rain to wash runoff in (caution): 0.2″, where
+    // Ventura County says runoff becomes a concern; SF publishes no number. Heavy rain
+    // (high): 0.5″, uncalibrated, with no published figure for SF’s sewer overflows.
+    cautionIn: 0.2, highIn: 0.5,
     afterHours: 72,
     // Forecast rain this far past the last measurement is too uncertain for High.
     sureForecastHours: 72,

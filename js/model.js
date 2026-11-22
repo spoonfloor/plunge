@@ -232,11 +232,16 @@ export function endAfterRain(rain, fromMs, atLeast, hours) {
 // sinceMs: when the posting began, where known. rain: as for lastRain, or null when it
 // didn’t load.
 //
+// The newest evidence wins: rain only counts if it ended after the last sample, so a
+// clean sample taken after a storm clears it.
+//
 // First match wins:
-//   1. Posted, and less than 72 hours since the sample, the overflow or the last heavy
-//      rain → Hazardous (high). Forecast rain more than 3 days past the last measurement
-//      doesn’t restart the clock. Without rain data, or a start to count from, a posting
-//      never ages.
+//   1. Posted → Hazardous (high). SFPUC samples an overflow posting daily and lifts it
+//      when the water is clean, so through today an overflow posting stands as is. A
+//      bacteria posting (sampled weekly), or an overflow posting on a day ahead, lasts
+//      72 hours from the sample, the overflow or the last heavy rain. Forecast rain more
+//      than 3 days past the last measurement doesn’t restart the clock. Without rain
+//      data, or a start to count from, a posting never ages.
 //   2. Heavy rain (≥ highIn in a day) in the last 72 hours → Heavy rain (high); Recent
 //      rain (caution) when it’s forecast more than 3 days past the last measurement.
 //   3. Light rain (≥ cautionIn) in the last 72 hours → Recent rain (caution).
@@ -253,7 +258,8 @@ export function assessWaterQuality(quality, rain, startMs, spot) {
   // A stretch ending at ms lasts through the hour before it.
   const until = ms => partOfDay(ms - 1, startMs, tz);
   const noRain = rain ? null : "Rain data didn’t load.";
-  const heavy = lastRain(rain, startMs, r.highIn), light = lastRain(rain, startMs, r.cautionIn);
+  const newer = x => x && (sampleMs == null || x.endMs > sampleMs) ? x : null;
+  const heavy = newer(lastRain(rain, startMs, r.highIn)), light = newer(lastRain(rain, startMs, r.cautionIn));
   const unsure = x => x?.forecast && startMs - rain.observedUntilMs > r.sureForecastHours * H;
   const recent = x => x && startMs < x.endMs + r.afterHours * H;
 
@@ -263,9 +269,10 @@ export function assessWaterQuality(quality, rain, startMs, spot) {
     const fromMs = overflow && q.sinceMs ? q.sinceMs : sampleMs;
     const on = fromMs ? ` ${shortDate(zonedParts(fromMs, tz).date)}` : "";
     // Past the forecast it trusts, the clock counts from the last heavy rain it does.
-    const restart = unsure(heavy) ? lastRain(rain, rain.observedUntilMs + (r.sureForecastHours - 1) * H, r.highIn) : heavy;
+    const restart = unsure(heavy) ? newer(lastRain(rain, rain.observedUntilMs + (r.sureForecastHours - 1) * H, r.highIn)) : heavy;
     const startsMs = [sampleMs, restart?.endMs, overflow ? q.sinceMs : null].filter(Number.isFinite);
-    const noStart = !rain || (overflow ? !q.sinceMs && !restart : !sampleMs);
+    const ahead = rain && zonedParts(startMs, tz).date > zonedParts(rain.observedUntilMs - 1, tz).date;
+    const noStart = !rain || (overflow ? !ahead || (!q.sinceMs && !restart) : !sampleMs);
     const endsMs = noStart ? Infinity : endAfterRain(rain, Math.max(...startsMs), r.highIn, wq.postingHours);
     if (startMs < endsMs) {
       return { level: "high", value: "Hazardous",
