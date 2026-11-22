@@ -42,6 +42,16 @@ function byHour(series, spot, dates, map = v => v) {
   return out;
 }
 const HOUR = 3600e3;
+
+// A forecast total over several hours, spread the way SFO’s gauge records rain: in
+// hundredths of an inch, as evenly as hundredths allow, so the total holds and every
+// hour is either dry or at least 0.01″. Spread exactly, 0.04″ over 6 hours would be six
+// hours of 0.007″ that the gauge would call a trace (none), each one counted as rain.
+// 0.04″ over 6 hours → [0.01, 0, 0.01, 0.01, 0, 0.01]. Under 0.005″ in all is a trace.
+export function spreadRain(total, hours) {
+  const upTo = k => Math.round(total * k / hours * 100);
+  return Array.from({ length: hours }, (_, k) => (upTo(k + 1) - upTo(k)) / 100);
+}
 const isEmpty = days => Object.values(days).every(hours => !Object.keys(hours).length);
 // Gridpoint weather types, most significant first.
 const WX_RANK = ["thunderstorms", "freezing_rain", "freezing_drizzle", "snow", "snow_showers", "rain",
@@ -294,8 +304,9 @@ const FETCHERS = {
   // { startMs, inches: [one per hour from startMs], observedUntilMs, gauge }. It starts
   // spot.rain.lookbackDays before the first day, so a day’s first hours can see the rain
   // before them. Measured: SFO’s gauge through the server; Open-Meteo’s model where that
-  // fails. Forecast: the NWS gridpoint rainfall, each 6-hour total spread evenly over
-  // its hours; Open-Meteo where that fails.
+  // fails. Forecast: the NWS gridpoint rainfall, each 6-hour total spread over its hours
+  // (see spreadRain); Open-Meteo where that fails. Model and forecast amounts are kept
+  // to the gauge’s hundredths, so a forecast hour is dry or wet the way a measured one is.
   async rain(spot, dates, shared) {
     const startMs = zonedToMs(`${addDays(dates[0], -spot.rain.lookbackDays)} 00:00`, spot.timeZone);
     const endMs = zonedToMs(`${addDays(dates.at(-1), 1)} 00:00`, spot.timeZone);
@@ -305,7 +316,8 @@ const FETCHERS = {
     const openMeteo = () => model ??= getJson(withQuery("https://api.open-meteo.com/v1/forecast", {
       latitude: spot.lat, longitude: spot.lon, hourly: "precipitation", precipitation_unit: "inch",
       timezone: "GMT", past_days: spot.rain.lookbackDays + 2, forecast_days: 8,
-    })).then(j => j.hourly.time.map((t, i) => ({ ms: Date.parse(`${t}:00Z`), in: j.hourly.precipitation[i] ?? 0 })));
+    })).then(j => j.hourly.time.map((t, i) => ({ ms: Date.parse(`${t}:00Z`),
+      in: Math.round((j.hourly.precipitation[i] ?? 0) * 100) / 100 })));
 
     let observedUntilMs, measured;
     try {
@@ -339,7 +351,7 @@ const FETCHERS = {
         const [start, span] = validTime.split("/");
         const [, d, h] = span.match(/P(?:(\d+)D)?T?(?:(\d+)H)?/).map(x => Number(x ?? 0));
         const hours = d * 24 + h;
-        for (let k = 0; k < hours; k++) fill(Date.parse(start) + k * HOUR, value / 25.4 / hours);
+        spreadRain(value / 25.4, hours).forEach((x, k) => fill(Date.parse(start) + k * HOUR, x));
       }
     } catch {
       for (const h of await openMeteo()) fill(h.ms, h.in);

@@ -201,15 +201,13 @@ export function lastRain(rain, ms, atLeast) {
   return null;
 }
 
-// When the next rain of at least atLeast inches in a day starts after the hour starting
-// at ms: the first wet hour of the stretch that reaches it. Null if none is forecast.
+// When, after the hour starting at ms, the rain next reaches atLeast inches in a day:
+// the hour it starts to count, which is when the rating changes. Drizzle leading up to
+// it doesn’t count. Null if none is forecast.
 export function nextRain(rain, ms, atLeast) {
   if (!rain) return null;
-  const now = Math.floor((ms - rain.startMs) / H);
-  for (let t = Math.max(0, now + 1); t < rain.inches.length; t++) {
-    if (!(rain.inches[t] > 0) || daySum(rain, t) < atLeast) continue;
-    while (t - 1 > now && rain.inches[t - 1] > 0) t--;
-    return rain.startMs + t * H;
+  for (let t = Math.max(0, Math.floor((ms - rain.startMs) / H) + 1); t < rain.inches.length; t++) {
+    if (rain.inches[t] > 0 && daySum(rain, t) >= atLeast) return rain.startMs + t * H;
   }
   return null;
 }

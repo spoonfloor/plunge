@@ -5,7 +5,7 @@ import { currentAt, peakCurrent, transferFactor, assessCurrent, assessWaves, ass
   assessWaterQuality, waterAdvisories, advisorySummary, advisoryParagraphs, currentKnots, thresholds, showsRain, skyKind, skyLine, skyText,
   tideAt, assessTide, feet, partOfDay } from "../js/model.js";
 import { sunIsUp } from "../js/time.js";
-import { forDate } from "../js/sources.js";
+import { forDate, spreadRain } from "../js/sources.js";
 import spot from "../js/spots/crissy-east.js";
 import { zonedToMs, zonedParts } from "../js/time.js";
 
@@ -175,6 +175,22 @@ test("water quality: a clean sample taken after the rain clears it", () => {
   assert.equal(wq(after, more, "2026-11-21 16:00").value, "Recent rain");
   // Under 0.2″ in a day isn’t enough to wash runoff in.
   assert.equal(wq(after, rainSeries({ "2026-11-21 14:00": 0.15 }), "2026-11-21 16:00").value, "OK");
+});
+
+test("water quality: forecast rain is spread in the gauge’s hundredths", () => {
+  assert.deepEqual(spreadRain(0.04, 6), [0.01, 0, 0.01, 0.01, 0, 0.01]);
+  assert.deepEqual(spreadRain(0.3, 6), [0.05, 0.05, 0.05, 0.05, 0.05, 0.05]);
+  assert.deepEqual(spreadRain(0.004, 6), [0, 0, 0, 0, 0, 0]); // a trace
+  assert.equal(Math.round(spreadRain(0.49, 6).reduce((a, b) => a + b) * 100), 49);
+});
+
+test("water quality: an OK day says when the rating changes, not when drizzle starts", () => {
+  const drizzle = Object.fromEntries([7, 8, 9, 10, 11, 12].map(h => [`2026-11-21 ${String(h).padStart(2, "0")}:00`, 0.01]));
+  const rain = rainSeries({ ...drizzle, "2026-11-21 13:00": 0.2 });
+  const after = { status: "clean", sampled: "2026-11-20" };
+  assert.deepEqual(wq(after, rain, "2026-11-21 06:00").notes, ["Until this afternoon, when rain is expected.", "Last sample, Nov 20, was clean."]);
+  assert.equal(wq(after, rain, "2026-11-21 12:00").level, "low");
+  assert.equal(wq(after, rain, "2026-11-21 13:00").level, "caution");
 });
 
 test("water quality: a bacteria posting is a warning for 72 hours after the sample, then OK", () => {
