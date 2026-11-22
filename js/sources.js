@@ -353,8 +353,8 @@ const FETCHERS = {
   // SFPUC beach postings, the feed behind https://webapps.sfpuc.org/sapps/beachesandbay.html.
   // XML wrapping a JSON array of stations. SFPUC doesn’t forecast, and the feed keeps no
   // history: past days come from the server’s record, and days ahead carry today’s
-  // posting forward, marked carried, since a posting stands until SFPUC resamples. A
-  // posting also says when it began (since, from the server’s record), where known.
+  // posting forward, since a posting stands until SFPUC resamples. A posting also says
+  // when it began (since, from the server’s record), where known.
   async waterQuality(spot, dates, shared) {
     const today = zonedParts(Date.now(), spot.timeZone).date;
     const recorded = Object.fromEntries(await Promise.all(dates.filter(d => d < today).map(async date =>
@@ -389,7 +389,7 @@ const FETCHERS = {
       ? { ...q, sinceMs } : q;
     return {
       data: Object.fromEntries(dates.map(date => [date, withSince(
-        date === today ? reading : recorded[date] ?? { ...reading, carried: true }, date)])),
+        date === today ? reading : recorded[date] ?? reading, date)])),
       label: `SFPUC beach water quality, ${spot.waterQuality.stationName}`,
       link: "https://webapps.sfpuc.org/sapps/beachesandbay.html",
     };

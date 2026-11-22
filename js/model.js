@@ -1,6 +1,6 @@
 // The risk model. Pure functions: data in, hourly assessment out. No fetching, no DOM.
 
-import { clockTime, hourLabel, zonedParts, zonedToMs } from "./time.js";
+import { addDays, clockTime, hourLabel, zonedParts, zonedToMs } from "./time.js";
 
 const KNOT_MS = 0.514444;
 const G = 9.81;
@@ -181,22 +181,35 @@ export function assessWaterTemp(temp, spot) {
 // ---- Water quality ----------------------------------------------------------------
 
 // rain: { startMs, inches: [one per hour from startMs], observedUntilMs, gauge } from
-// sources.js. The latest hour up to the one starting at ms when rain was falling and
-// the 24 hours to it held at least atLeast inches (as shown, to the hundredth), or
-// null: { endMs, the end of that hour; inches, the storm’s total, back to the last
-// 12 dry hours before it; forecast, whether it’s forecast rather than measured }.
+// sources.js. The rain in the 24 hours up to and including hour t, to the hundredth.
+function daySum(rain, t) {
+  let x = 0;
+  for (let k = Math.max(0, t - 23); k <= t; k++) x += rain.inches[k] ?? 0;
+  return round2(x);
+}
+
+// The latest hour up to the one starting at ms when rain was falling and the 24 hours
+// to it held at least atLeast inches, or null: { endMs, the end of that hour; forecast,
+// whether it’s forecast rather than measured }.
 export function lastRain(rain, ms, atLeast) {
   if (!rain) return null;
-  const day = t => { let x = 0; for (let k = Math.max(0, t - 23); k <= t; k++) x += rain.inches[k] ?? 0; return round2(x); };
   for (let t = Math.min(Math.floor((ms - rain.startMs) / H), rain.inches.length - 1); t >= 0; t--) {
-    if (!(rain.inches[t] > 0) || day(t) < atLeast) continue;
-    let total = 0;
-    for (let u = t, dry = 0; u >= 0 && dry < 12; u--) {
-      total += rain.inches[u] ?? 0;
-      dry = rain.inches[u] > 0 ? 0 : dry + 1;
-    }
+    if (!(rain.inches[t] > 0) || daySum(rain, t) < atLeast) continue;
     const hourMs = rain.startMs + t * H;
-    return { endMs: hourMs + H, inches: round2(total), forecast: hourMs >= rain.observedUntilMs };
+    return { endMs: hourMs + H, forecast: hourMs >= rain.observedUntilMs };
+  }
+  return null;
+}
+
+// When the next rain of at least atLeast inches in a day starts after the hour starting
+// at ms: the first wet hour of the stretch that reaches it. Null if none is forecast.
+export function nextRain(rain, ms, atLeast) {
+  if (!rain) return null;
+  const now = Math.floor((ms - rain.startMs) / H);
+  for (let t = Math.max(0, now + 1); t < rain.inches.length; t++) {
+    if (!(rain.inches[t] > 0) || daySum(rain, t) < atLeast) continue;
+    while (t - 1 > now && rain.inches[t - 1] > 0) t--;
+    return rain.startMs + t * H;
   }
   return null;
 }
@@ -213,40 +226,42 @@ export function endAfterRain(rain, fromMs, atLeast, hours) {
 }
 
 // One hour’s water quality, from the day’s SFPUC posting and the rain around it.
-// quality: { status, reason, sampled: "2026-11-09" | null, sinceMs, carried } from
-// sources.js. status is "clean", "posted" or "unsampled" for a reading; "unrecorded" for
-// a past day with no record of its posting. reason, for a posting: "overflow" or
-// "bacteria". sinceMs: when the posting began, where known. carried: a day ahead,
-// assuming today’s posting holds. rain: as for lastRain, or null when it didn’t load.
+// quality: { status, reason, sampled: "2026-11-09" | null, sinceMs } from sources.js.
+// status is "clean", "posted" or "unsampled" for a reading; "unrecorded" for a past day
+// with no record of its posting. reason, for a posting: "overflow" or "bacteria".
+// sinceMs: when the posting began, where known. rain: as for lastRain, or null when it
+// didn’t load.
 //
 // First match wins:
 //   1. Posted, and less than 72 hours since the sample, the overflow or the last heavy
 //      rain → Hazardous (high). Forecast rain more than 3 days past the last measurement
 //      doesn’t restart the clock. Without rain data, or a start to count from, a posting
 //      never ages.
-//   2. Heavy rain (≥ highIn in a day) in the last 72 hours → Rain advisory: high, or
-//      caution when it’s forecast rain more than 3 days past the last measurement.
+//   2. Heavy rain (≥ highIn in a day) in the last 72 hours → Heavy rain (high); Recent
+//      rain (caution) when it’s forecast more than 3 days past the last measurement.
 //   3. Light rain (≥ cautionIn) in the last 72 hours → Recent rain (caution).
-//   4. Posted, but aged out with no heavy rain → Probably OK (low).
-//   5. A clean sample under 8 days old → OK (low).
-//   6. Anything else → unrated.
+//   4. Posted but aged out, or a clean sample under 8 days old → OK (low).
+//   5. Anything else → unrated.
+//
+// Each card says, at most: when it changes (“Warning until Monday morning”, or “Until
+// Tuesday afternoon, when rain is expected”), then what SFPUC last said. Times are
+// parts of the day, not hours: they rest on forecasts.
 export function assessWaterQuality(quality, rain, startMs, spot) {
   const wq = spot.waterQuality, r = spot.rain, tz = spot.timeZone;
   const q = quality?.status ? quality : null;
   const sampleMs = q?.sampled ? zonedToMs(`${q.sampled} ${String(wq.sampleHour).padStart(2, "0")}:00`, tz) : null;
-  const until = ms => whenText(ms, startMs, tz);
-  const sampled = q?.sampled ? `Sampled ${shortDate(q.sampled)}` : null;
-  const tail = [
-    rain ? null : "Rainfall didn’t load.",
-    q?.carried ? "Assumes today’s posting holds." : null,
-  ];
+  // A stretch ending at ms lasts through the hour before it.
+  const until = ms => partOfDay(ms - 1, startMs, tz);
+  const noRain = rain ? null : "Rain data didn’t load.";
   const heavy = lastRain(rain, startMs, r.highIn), light = lastRain(rain, startMs, r.cautionIn);
   const unsure = x => x?.forecast && startMs - rain.observedUntilMs > r.sureForecastHours * H;
   const recent = x => x && startMs < x.endMs + r.afterHours * H;
 
-  let agedPosting = null;
+  let posted = null;
   if (q?.status === "posted") {
     const overflow = q.reason === "overflow";
+    const fromMs = overflow && q.sinceMs ? q.sinceMs : sampleMs;
+    const on = fromMs ? ` ${shortDate(zonedParts(fromMs, tz).date)}` : "";
     // Past the forecast it trusts, the clock counts from the last heavy rain it does.
     const restart = unsure(heavy) ? lastRain(rain, rain.observedUntilMs + (r.sureForecastHours - 1) * H, r.highIn) : heavy;
     const startsMs = [sampleMs, restart?.endMs, overflow ? q.sinceMs : null].filter(Number.isFinite);
@@ -254,66 +269,57 @@ export function assessWaterQuality(quality, rain, startMs, spot) {
     const endsMs = noStart ? Infinity : endAfterRain(rain, Math.max(...startsMs), r.highIn, wq.postingHours);
     if (startMs < endsMs) {
       return { level: "high", value: "Hazardous",
-        why: `SFPUC has posted this beach for ${POSTED_FOR[q.reason] ?? "bacteria or a sewer overflow"}. Don’t go in.`,
-        notes: [overflow ? "Sewer overflow nearby. Don’t go in." : q.reason === "bacteria" ? "High bacteria. Don’t go in."
-          : "High bacteria or a sewer overflow. Don’t go in.", sampled,
-          Number.isFinite(endsMs) ? `Probably clears ${until(endsMs)}, if no more heavy rain.` : null, ...tail].filter(Boolean) };
+        why: `Posted for ${POSTED_FOR[q.reason] ?? "bacteria or a sewer overflow"}.`,
+        notes: [`Warning until ${Number.isFinite(endsMs) ? until(endsMs) : "SFPUC resamples"}.`,
+          `Posted${on}${q.reason ? ` for ${POSTED_FOR[q.reason]}` : ""}.`, noRain].filter(Boolean) };
     }
-    const fromMs = overflow && q.sinceMs ? q.sinceMs : sampleMs;
-    agedPosting = `SFPUC’s posting for ${POSTED_FOR[q.reason] ?? "bacteria or a sewer overflow"}` +
-      `${fromMs ? `, from ${shortDate(zonedParts(fromMs, tz).date)},` : ""} is still up.`;
+    posted = `Warning posted${on}, not yet resampled.`;
   }
 
-  const posting = agedPosting ?? (q?.status === "clean" && sampled ? `Last sample, ${shortDate(q.sampled)}, was clean.`
-    : q?.status === "unsampled" ? "SFPUC isn’t sampling this beach right now." : null);
-  const rainNotes = (x, atLeast, effect) => [
-    `${inches(x.inches)} of rain${x.forecast ? " forecast" : ` at ${rain.gauge}`}. ${effect}`,
-    `Until about ${until(endAfterRain(rain, x.endMs, atLeast, r.afterHours))}.`,
-    x.forecast ? "Estimate from the rain forecast." : null,
-    posting, ...tail,
-  ].filter(Boolean);
-  if (recent(heavy)) {
-    return { level: unsure(heavy) ? "caution" : "high", value: "Rain advisory",
-      why: "Heavy rain in the last 3 days overflows the sewers and washes runoff into the bay. Don’t go in.",
-      notes: rainNotes(heavy, r.highIn, "Heavy rain overflows the sewers and washes runoff into the bay.") };
+  // What SFPUC last said, under the line about when things change.
+  const sampleAge = sampleMs == null ? Infinity : startMs - sampleMs;
+  const freshClean = q?.status === "clean" && sampleAge <= wq.cleanForDays * 24 * H;
+  const status = posted ?? (freshClean ? `Last sample, ${shortDate(q.sampled)}, was clean.`
+    : q?.status === "unsampled" ? "SFPUC isn’t sampling here right now." : null);
+  // A warning lasts as long as heavy rain keeps it going; an advisory, as long as any
+  // rain does (heavy rain is rain too, so light’s stretch always covers heavy’s).
+  const rainCard = high => ({
+    level: high ? "high" : "caution", value: high ? "Heavy rain" : "Recent rain",
+    ...(high && { why: "Heavy rain in the last 3 days." }),
+    notes: [high ? `Warning until ${until(endAfterRain(rain, heavy.endMs, r.highIn, r.afterHours))}.`
+      : `Advisory until ${until(endAfterRain(rain, light.endMs, r.cautionIn, r.afterHours))}.`, status].filter(Boolean),
+  });
+  if (recent(heavy)) return rainCard(!unsure(heavy));
+  if (recent(light)) return rainCard(false);
+  if (posted || freshClean) {
+    const next = nextRain(rain, startMs, r.cautionIn);
+    return { level: "low", value: "OK",
+      notes: [next ? `Until ${partOfDay(next, startMs, tz)}, when rain is expected.` : null, status, noRain].filter(Boolean) };
   }
-  if (recent(light)) {
-    return { level: "caution", value: "Recent rain",
-      notes: rainNotes(light, r.cautionIn, "Rain washes runoff into the bay.") };
-  }
-  if (agedPosting) {
-    return { level: "low", value: "Probably OK",
-      notes: [`${agedPosting} ${wq.postingHours / 24} days with no heavy rain since, so it has probably cleared.`,
-        "SFPUC hasn’t resampled yet.", ...tail].filter(Boolean) };
-  }
-  if (!q) return unknown(quality ? "No record of this day’s posting." : "SFPUC water quality didn’t load.");
+  if (!q) return unknown(quality ? "No record of this day’s posting." : "SFPUC didn’t load.");
   switch (q.status) {
-    case "clean":
-      if (sampleMs && startMs - sampleMs <= wq.cleanForDays * 24 * H) {
-        return { level: "low", value: "OK", notes: [sampled, ...tail].filter(Boolean) };
-      }
-      return unknown(sampled ? `The last sample, ${shortDate(q.sampled)}, is over a week old.` : "No recent sample.");
-    case "unsampled": return unknown(`SFPUC isn’t sampling this beach right now. ${sampled ?? "No recent sample"}.`);
+    case "clean": return unknown(q.sampled ? `No sample since ${shortDate(q.sampled)}.` : "No recent sample.");
+    case "unsampled": return unknown("SFPUC isn’t sampling here right now.");
     case "unrecorded": return unknown("No record of this day’s posting.");
     default: return unknown("No water quality for this day.");
   }
 }
 const POSTED_FOR = { overflow: "a sewer overflow", bacteria: "high bacteria" };
 
-// 0.08 → “0.08″”, 1.46 → “1.5″”
-const inches = x => `${x < 1 ? x.toFixed(2) : x.toFixed(1)}″`;
-
-// An instant, said from the hour starting fromMs: “at 4 PM” the same day, “Mon 10 AM”
-// within the week, “Nov 29 10 AM” past it. Midnight is the end of the day before it:
-// “Sat midnight”. Minutes are dropped: these are estimates.
-function whenText(ms, fromMs, timeZone) {
-  const midnight = zonedParts(ms, timeZone).hour === 0;
-  const at = zonedParts(midnight ? ms - 1 : ms, timeZone), from = zonedParts(fromMs, timeZone);
-  const hour = midnight ? "midnight" : hourLabel(at.hour);
-  if (at.date === from.date) return midnight ? "at midnight" : `at ${hour}`;
-  const days = (Date.parse(at.date) - Date.parse(from.date)) / 864e5;
-  const weekday = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short" }).format(Date.parse(at.date));
-  return days < 7 ? `${weekday} ${hour}` : `${shortDate(at.date)} ${hour}`;
+// An instant as a part of the day, said from the hour starting fromMs: “this
+// afternoon”, “tonight”, “tomorrow morning”, “Sunday evening”, or past a week, “Nov 29”.
+// Night runs from 9 PM to 5 AM and belongs to the evening it starts in.
+const PARTS = [[21, "night"], [17, "evening"], [12, "afternoon"], [5, "morning"]];
+export function partOfDay(ms, fromMs, timeZone) {
+  const at = zonedParts(ms, timeZone);
+  const date = at.hour < 5 ? addDays(at.date, -1) : at.date;
+  const part = at.hour < 5 ? "night" : PARTS.find(([h]) => at.hour >= h)[1];
+  const days = (Date.parse(date) - Date.parse(zonedParts(fromMs, timeZone).date)) / 864e5;
+  if (days <= 0) return part === "night" ? "tonight" : `this ${part}`;
+  if (days === 1) return `tomorrow ${part}`;
+  if (days >= 7) return shortDate(date);
+  const weekday = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long" }).format(Date.parse(date));
+  return `${weekday} ${part}`;
 }
 
 // ---- Sky ---------------------------------------------------------------------------
@@ -463,7 +469,7 @@ export function overall(factors) {
   if (factors.waterQuality?.level === "high") {
     const also = atLeast("caution").filter(k => k !== "waterQuality");
     return rated("high", ["waterQuality", ...also],
-      factors.waterQuality.why ?? "SFPUC has posted this beach for bacteria or a sewer overflow. Don’t go in.");
+      factors.waterQuality.why ?? "Posted for bacteria or a sewer overflow.");
   }
   // Missing data can hide a hazard but never cancels a known one: any factor at high
   // still makes the hour high. Short of that, a low or caution could be a false
