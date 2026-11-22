@@ -240,14 +240,16 @@ export function endAfterRain(rain, fromMs, atLeast, hours) {
 //      72 hours from the sample, the overflow or the last heavy rain. Forecast rain more
 //      than 3 days past the last measurement doesn’t restart the clock. Without rain
 //      data, or a start to count from, a posting never ages.
-//   2. Heavy rain (≥ highIn in a day) in the last 72 hours → Heavy rain (high); Recent
-//      rain (caution) when it’s forecast more than 3 days past the last measurement.
+//   2. Heavy rain (≥ highIn in a day) in the last 72 hours → Recent rain (high); caution
+//      when it’s forecast more than 3 days past the last measurement.
 //   3. Light rain (≥ cautionIn) in the last 72 hours → Recent rain (caution).
 //   4. Posted but aged out, or a clean sample under 8 days old → OK (low).
 //   5. Anything else → unrated.
 //
-// Each card says, at most: when it changes (“Warning until Monday morning”, or “Until
-// Tuesday afternoon, when rain is expected”), then what SFPUC last said. Times are
+// Each card says, at most: when it changes (“Warning until Monday morning, after
+// Thursday’s storm”, or “Until Tuesday afternoon, when rain is expected”), then what
+// SFPUC last said. Rain is “Recent rain” at either level: the rating says how bad, and
+// naming the storm ties the card to rain that may be days back, off the sky strip. Times are
 // parts of the day, not hours: they rest on forecasts.
 export function assessWaterQuality(quality, rain, startMs, spot) {
   const wq = spot.waterQuality, r = spot.rain, tz = spot.timeZone;
@@ -288,14 +290,17 @@ export function assessWaterQuality(quality, rain, startMs, spot) {
     : q?.status === "unsampled" ? "SFPUC isn’t sampling here right now." : null);
   // A warning lasts as long as heavy rain keeps it going; an advisory, as long as any
   // rain does (heavy rain is rain too, so light’s stretch always covers heavy’s).
-  const rainCard = high => ({
-    level: high ? "high" : "caution", value: high ? "Heavy rain" : "Recent rain",
-    ...(high && { why: "Heavy rain in the last 3 days." }),
-    notes: [high ? `Warning until ${until(endAfterRain(rain, heavy.endMs, r.highIn, r.afterHours))}.`
-      : `Advisory until ${until(endAfterRain(rain, light.endMs, r.cautionIn, r.afterHours))}.`, status].filter(Boolean),
-  });
-  if (recent(heavy)) return rainCard(!unsure(heavy));
-  if (recent(light)) return rainCard(false);
+  // The rain behind it is named by its day, as a storm when it was heavy.
+  const rainCard = (high, cause) => {
+    const ends = high ? endAfterRain(rain, heavy.endMs, r.highIn, r.afterHours)
+      : endAfterRain(rain, light.endMs, r.cautionIn, r.afterHours);
+    const after = `${dayName(stormDay(rain, cause.endMs, tz), startMs, tz)} ${cause === heavy ? "storm" : "rain"}`;
+    return { level: high ? "high" : "caution", value: "Recent rain",
+      ...(high && { why: "Heavy rain in the last 3 days." }),
+      notes: [`${high ? "Warning" : "Advisory"} until ${until(ends)}, after ${after}.`, status].filter(Boolean) };
+  };
+  if (recent(heavy)) return rainCard(!unsure(heavy), heavy);
+  if (recent(light)) return rainCard(false, light);
   if (posted || freshClean) {
     const next = nextRain(rain, startMs, r.cautionIn);
     return { level: "low", value: "OK",
@@ -310,6 +315,30 @@ export function assessWaterQuality(quality, rain, startMs, spot) {
   }
 }
 const POSTED_FOR = { overflow: "a sewer overflow", bacteria: "high bacteria" };
+
+// The day of a storm that ended with the hour before endMs: the day with the most rain
+// in it, back to the last 24 dry hours (the window rain is counted in). 4.3″ over
+// Wednesday to Friday is Wednesday’s.
+function stormDay(rain, endMs, timeZone) {
+  const byDay = new Map();
+  for (let t = Math.floor((endMs - rain.startMs) / H) - 1, dry = 0; t >= 0 && dry < 24; t--) {
+    const x = rain.inches[t] ?? 0;
+    dry = x > 0 ? 0 : dry + 1;
+    const date = zonedParts(rain.startMs + t * H, timeZone).date;
+    byDay.set(date, (byDay.get(date) ?? 0) + x);
+  }
+  return [...byDay].reduce((a, b) => b[1] > a[1] ? b : a)[0];
+}
+
+// A day, said from the hour starting fromMs, as an owner: “today’s”, “yesterday’s”,
+// “tomorrow’s”, “Thursday’s”.
+function dayName(date, fromMs, timeZone) {
+  const days = (Date.parse(date) - Date.parse(zonedParts(fromMs, timeZone).date)) / 864e5;
+  if (days === 0) return "today’s";
+  if (days === -1) return "yesterday’s";
+  if (days === 1) return "tomorrow’s";
+  return `${new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long" }).format(Date.parse(date))}’s`;
+}
 
 // An instant as a part of the day, said from the hour starting fromMs: “this
 // afternoon”, “tonight”, “tomorrow morning”, “Sunday evening”, or past a week, “Nov 29”.
