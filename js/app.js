@@ -22,7 +22,7 @@ const FACTORS = [
   { key: "waves", name: "Waves", curve: true },
   { key: "wind", name: "Wind", curve: true },
   { key: "waterTemp", name: "Water temperature" },
-  { key: "waterQuality", name: "Water quality" },
+  { key: "waterQuality", name: "Water quality", linkTo: "SFPUC" },
 ];
 const THRESHOLDS = thresholds(spot);
 const REFRESH_AFTER_MS = 15 * 60e3;
@@ -94,12 +94,16 @@ const hazardsLabel = active => ["high", "caution"].map(level => {
   return names.length ? `${level}: ${names.join(", ")}` : null;
 }).filter(Boolean).join("; ");
 
+// The arrow out of a box, after a card title that opens the source’s own page.
+const EXTERNAL_ICON = () => svg("svg", { class: "external-icon", viewBox: "0 0 16 16", "aria-hidden": "true" },
+  svg("path", { d: "M9.5 2.5h4v4M13.5 2.5l-6 6M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3" }));
 const skyIcon = sky => svg("svg", { class: "sky-icon", viewBox: "0 0 24 24", "aria-hidden": "true" }, SKY_ICONS[skyKind(sky)]());
 
 // date: the day shown. selected: the hour picked, or null for “now” (on other days,
 // the hour it is now). Both carry across days, so swiping compares the same hour.
 const state = { today: null, dates: [], days: {}, alerts: null, date: null, selected: null,
-  open: new Set(), rainOpen: false, summaryOpen: false, advisoriesOpen: false, lastLoad: 0, loading: false };
+  open: new Set(), rainOpen: false, summaryOpen: false, advisoriesOpen: false, lastLoad: 0, loading: false,
+  links: {} };
 
 async function refresh() {
   if (state.loading) return;
@@ -126,6 +130,7 @@ async function refresh() {
       // The forecast’s sky where it has the hour; what a station reported where it doesn’t.
       return [date, { hours, sky: { ...day.skyObserved, ...day.sky }, tide: data.tide, currents: data.currents }];
     }));
+    state.links = Object.fromEntries(sources.filter(s => s.link).map(s => [s.key, s.link]));
     state.lastLoad = Date.now();
     renderStatus(sources);
     render();
@@ -282,7 +287,7 @@ function dayPanel(date, side) {
     waterTemp: "Today’s reading. There’s no forecast for water temperature.",
   };
   const factors = el("ul", { class: "factors", "aria-label": "Factors for the selected hour" },
-    FACTORS.map(({ key, name, curve }, i) => {
+    FACTORS.map(({ key, name, curve, linkTo }, i) => {
       const f = r.factors[key];
       const rated = f.level in LABELS && f.level !== "unknown";
       const open = curve && state.open.has(key);
@@ -294,7 +299,10 @@ function dayPanel(date, side) {
       },
         curve ? el("button", { type: "button", class: "expand", "aria-expanded": String(open),
           "aria-label": `${open ? "Hide" : "Show"} ${name.toLowerCase()} through the day` }) : null,
-        el("p", { class: "name" }, el("span", {}, name),
+        el("p", { class: "name" }, linkTo && state.links[key]
+          ? el("a", { href: state.links[key], target: "_blank", rel: "noopener", "aria-label": `${name}, on ${linkTo}’s site` },
+            name, EXTERNAL_ICON())
+          : el("span", {}, name),
           el("span", { class: "rating" }, rated ? LABELS[f.level] : f.trend, curve ? el("span", { class: "chevron", "aria-hidden": "true" }) : null)),
         el("p", { class: "value" }, f.value),
         graph,
