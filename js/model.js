@@ -75,7 +75,7 @@ export function assessCurrent(events, startMs, spot) {
   const beach = round1(Math.abs(channel) * spot.current.nearshoreFactor);
   const level = levelFor(beach, currentKnots(spot));
   const way = Math.abs(channel) < 0.05 ? "Near slack"
-    : channel < 0 ? "Ebb, pulling west toward the Gate" : "Flood, pushing east toward the Marina";
+    : channel < 0 ? spot.current.ebb : spot.current.flood;
   const slacks = nextSlacks(events, startMs);
   return {
     level,
@@ -142,13 +142,38 @@ export function beachWaveFt(swells, spot) {
   return Math.hypot(...parts.map(c => c.ft * transferFactor(c.periodS, c.dirDeg, spot.waves)));
 }
 
-// waves: one hour, either { beachFt } from the NWS nearshore model or { swells } from
-// the offshore forecast.
+// The height waves break at (feet) on an open beach, from their significant height
+// (hsM, meters) and peak period (tpS, seconds) where the water is depthM deep, as a
+// nearshore model such as CDIP’s gives them. Linear wave theory takes the height back to
+// deep water, as if the seafloor hadn’t shoaled it yet (the model has already bent it
+// toward the beach), and Komar and Gaudet’s formula (1973) breaks it: Hb = 0.39 g^⅕ (T H₀²)^⅖.
+// Long-period swell grows the most on its way in: 1 m at 13 s breaks at about 1.6 m.
+export function breakerFt({ hsM, tpS, depthM }) {
+  if (!(hsM > 0) || !(tpS > 0) || !(depthM > 0)) return null;
+  const w = 2 * Math.PI / tpS;
+  // Wavenumber where the water is depthM deep: solve w² = g k tanh(k h) (Newton’s method).
+  let k = w * w / G;
+  for (let i = 0; i < 30; i++) {
+    const t = Math.tanh(k * depthM);
+    k -= (G * k * t - w * w) / (G * t + G * k * depthM * (1 - t * t));
+  }
+  const kh = k * depthM;
+  const groupSpeed = (w / k) / 2 * (1 + 2 * kh / Math.sinh(2 * kh));
+  const deepGroupSpeed = G / (2 * w);
+  const deepM = hsM / Math.sqrt(deepGroupSpeed / groupSpeed);
+  return 0.39 * G ** 0.2 * (tpS * deepM * deepM) ** 0.4 / 0.3048;
+}
+
+// waves: one hour, one of { beachFt } from the NWS nearshore model, { swells } from the
+// offshore forecast, or { nearshore: { hsM, tpS, depthM } } from CDIP’s model off an open
+// beach, rated on the height the waves break at.
 export function assessWaves(waves, spot) {
-  const raw = waves?.beachFt ?? beachWaveFt(waves?.swells, spot);
+  const breaking = waves?.nearshore ? breakerFt(waves.nearshore) : null;
+  const raw = breaking ?? waves?.beachFt ?? beachWaveFt(waves?.swells, spot);
   if (raw == null) return unknown("No wave forecast for this hour.");
   const beach = round1(raw);
-  return { level: levelFor(beach, spot.thresholds.beachWaveFt), amount: beach, value: `${fmt(beach)} ft`, notes: [] };
+  return { level: levelFor(beach, spot.thresholds.beachWaveFt), amount: beach, value: `${fmt(beach)} ft`,
+    notes: breaking == null ? [] : [`Breaking height, ${Math.round(waves.nearshore.tpS)}-second swell`] };
 }
 
 // ---- Wind and water temperature ----------------------------------------------------

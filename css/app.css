@@ -24,7 +24,7 @@ main { box-sizing: border-box; max-width: 640px; margin: 0 auto;
    the top of a Home Screen app. Any color works, the page color included. (WebKit’s
    LocalFrameView::fixedContainerEdges: fixed or sticky, ≥90% of the width, >10px, not
    transparent.) Controls go inside it. */
-#top-bar { position: fixed; z-index: 1; top: 0; left: 0; right: 0; box-sizing: border-box;
+#top-bar { position: fixed; z-index: 5; top: 0; left: 0; right: 0; box-sizing: border-box;
   height: calc(env(safe-area-inset-top) + var(--top-bar-height) + var(--day-dots-height));
   padding: env(safe-area-inset-top) max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
   display: flex; flex-direction: column; background: var(--page-color); }
@@ -33,6 +33,32 @@ main { box-sizing: border-box; max-width: 640px; margin: 0 auto;
 #top-bar .top-row { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   height: var(--top-bar-height); }
 #top-bar h1 { margin: 0; font-size: 17px; font-weight: 600; }
+
+/* The beach’s name is the button that opens the menu of beaches: a chevron after it,
+   pointing up while the menu is open. */
+#spot-button { display: inline-flex; align-items: center; gap: 8px; margin: 0 0 0 -8px; padding: 8px;
+  border: 0; border-radius: 10px; background: none; color: inherit; font: inherit; cursor: pointer; }
+#spot-button .chevron { margin: 0 0 4px; }
+#spot-button[aria-expanded="true"] .chevron { margin: 4px 0 0; transform: rotate(-135deg); }
+#spot-button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+
+/* The menu drops from the name, over the page, which dims behind it (#spot-scrim, under
+   the top bar so the bar stays opaque for iOS). Each row: a check on the beach shown,
+   its name and its rating now. */
+#spot-menu { position: absolute; z-index: 1; top: calc(env(safe-area-inset-top) + var(--top-bar-height) - 2px);
+  left: max(8px, env(safe-area-inset-left)); min-width: 236px; padding: 4px 0; box-sizing: border-box;
+  background: var(--menu-color); border: 0.5px solid var(--line-color); border-radius: 14px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18); }
+#spot-menu[hidden], #spot-scrim[hidden] { display: none; }
+#spot-menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 14px;
+  border: 0; background: none; color: var(--text-color); font: inherit; font-size: 16px; text-align: left; cursor: pointer; }
+#spot-menu button:focus-visible { outline: none; background: var(--line-color); }
+#spot-menu .check { flex: none; width: 16px; height: 16px; stroke: var(--accent-color); stroke-width: 2.2; fill: none;
+  stroke-linecap: round; stroke-linejoin: round; visibility: hidden; }
+#spot-menu [aria-checked="true"] .check { visibility: visible; }
+#spot-menu .spot-label { flex: 1; }
+#spot-menu .spot-level { font-size: 14px; color: var(--chip-color); }
+#spot-scrim { position: fixed; z-index: 4; inset: 0; background: color-mix(in srgb, var(--page-color), transparent 35%); }
 
 /* One line per day under the title, all the same length: the day shown is solid, today
    the accent blue (when it’s not the one shown). Tap one to go there; swiping the page

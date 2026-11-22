@@ -29,6 +29,9 @@ export default {
     // Uncalibrated: the beach sees a fraction of the channel speed (shallower water,
     // more friction, the Crissy eddy).
     nearshoreFactor: 0.5,
+    // Which way each phase of the tide moves water past the beach, for the card.
+    ebb: "Ebb, pulling west toward the Gate",
+    flood: "Flood, pushing east toward the Marina",
   },
 
   tide: { station: "9414290", stationName: "San Francisco (Presidio)" },
@@ -38,6 +41,9 @@ export default {
   skyObserved: { station: "KSFO", stationName: "SFO" },
 
   waves: {
+    // Wave height at the beach from the NWS Nearshore Wave Prediction System, read
+    // through Plunge’s server function, which also records it for past days.
+    source: "nwps",
     // Open-Meteo marine model point just outside the Golden Gate.
     lat: 37.8,
     lon: -122.53,
@@ -66,7 +72,8 @@ export default {
 
   // SFPUC shoreline bacteria monitoring. Sampled weekly.
   waterQuality: {
-    station: "4612", stationName: "Crissy Field Beach East",
+    // The beach’s stations (the worst of them counts) and the name the card gives them.
+    stations: ["4612"], stationName: "Crissy Field Beach East",
     // A clean sample stands for a weekly cycle plus a day for the lab.
     cleanForDays: 8,
     // A bacteria posting is a weekly sample’s finding; with no heavy rain since, it’s

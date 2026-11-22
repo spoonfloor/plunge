@@ -13,6 +13,7 @@
 
   --page-color: var(--config-page-light);
   --surface-color: color-mix(in srgb, var(--page-color), black 6%); /* cards, sheets */
+  --menu-color: color-mix(in srgb, var(--page-color), white 70%); /* menus over the page */
   --text-color: #171717;
   --text-muted: #525252;
   /* Links and focus rings on the page. The accent itself (the icon’s sky blue) is too
@@ -43,6 +44,7 @@
   :root {
     --page-color: var(--config-page-dark);
     --surface-color: color-mix(in srgb, var(--page-color), white 10%);
+    --menu-color: color-mix(in srgb, var(--page-color), white 14%);
     --text-color: #eeeeee;
     --text-muted: #a3a3a3;
     --accent-color: var(--config-accent);

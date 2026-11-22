@@ -3,10 +3,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { currentAt, peakCurrent, transferFactor, assessCurrent, assessWaves, assessWind, windPush, overall, summarizeDay, hourSpan,
   assessWaterQuality, waterAdvisories, advisorySummary, advisoryParagraphs, currentKnots, thresholds, showsRain, skyKind, skyLine, skyText,
-  tideAt, assessTide, feet, partOfDay, assessWaterTemp } from "../js/model.js";
+  tideAt, assessTide, feet, partOfDay, assessWaterTemp, breakerFt } from "../js/model.js";
 import { sunIsUp } from "../js/time.js";
-import { forDate, spreadRain } from "../js/sources.js";
+import { forDate, spreadRain, worstPosting } from "../js/sources.js";
 import spot from "../js/spots/crissy-east.js";
+import baker from "../js/spots/baker-beach.js";
 import { zonedToMs, zonedParts } from "../js/time.js";
 
 const H = 3600e3;
@@ -402,4 +403,35 @@ test("a day ahead marks today’s water temperature as an estimate, still rated"
   assert.deepEqual(assessWaterTemp({ f: 61.6 }, spot), { level: "low", value: "62°F", notes: [] });
   assert.deepEqual(assessWaterTemp({ f: 47.2, estimate: true }, spot),
     { level: "caution", value: "~47°F", notes: ["Based on today’s reading. No forecast available."] });
+});
+
+test("open-beach waves are rated on the height they break at", () => {
+  // Long-period swell grows on its way in: 1 m at 13 s, 10 m deep, breaks at about 1.6 m.
+  assert.ok(Math.abs(breakerFt({ hsM: 1, tpS: 13, depthM: 10 }) * 0.3048 - 1.62) < 0.02);
+  assert.ok(breakerFt({ hsM: 1, tpS: 16, depthM: 10 }) > breakerFt({ hsM: 1, tpS: 8, depthM: 10 }));
+  assert.equal(breakerFt({ hsM: 0, tpS: 13, depthM: 10 }), null);
+  const calm = assessWaves({ nearshore: { hsM: 0.25, tpS: 8, depthM: 10 } }, baker);
+  assert.equal(calm.level, "low");
+  assert.deepEqual(calm.notes, ["Breaking height, 8-second swell"]);
+  assert.equal(assessWaves({ nearshore: { hsM: 1, tpS: 13, depthM: 10 } }, baker).level, "high");
+});
+
+test("each beach says which way its current runs", () => {
+  const ebb = [{ ms: 0, knots: -1 }, { ms: 2 * H, knots: 0 }];
+  assert.equal(assessCurrent(ebb, 0, spot).notes[0], "Ebb, pulling west toward the Gate");
+  assert.equal(assessCurrent(ebb, 0, baker).notes[0], "Ebb, pulling south toward China Beach");
+});
+
+test("a beach with several stations takes the worst of them", () => {
+  const station = (stationid, more) => ({ stationid, sample_date: "11/19/26", ...more });
+  const ids = ["1", "2", "3"];
+  assert.deepEqual(worstPosting([station("1"), station("2", { sample_date: "11/18/26" }), station("3")], ids),
+    { status: "clean", sampled: "2026-11-18" });
+  assert.deepEqual(worstPosting([station("1"), station("2", { s_color: "R" }), station("3", { cso: "Baker" })], ids),
+    { status: "posted", reason: "overflow", sampled: "2026-11-19" });
+  assert.deepEqual(worstPosting([station("1"), station("2", { s_color: "Y" }), station("3")], ids),
+    { status: "unsampled", sampled: "2026-11-19" });
+  // A station missing from the feed isn’t known to be clean.
+  assert.equal(worstPosting([station("1"), station("2")], ids).status, "unsampled");
+  assert.throws(() => worstPosting([], ids));
 });

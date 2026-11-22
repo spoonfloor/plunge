@@ -27,11 +27,15 @@
 <body>
 <header id="top-bar">
   <div class="top-row">
-    <h1>Crissy East</h1>
+    <!-- The beach shown; tapping it opens the menu of beaches (app.js fills it). -->
+    <h1><button id="spot-button" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="spot-menu"><span
+      id="spot-name">Crissy East</span><span class="chevron" aria-hidden="true"></span></button></h1>
     <button id="refresh" type="button" aria-label="Refresh data"><span id="updated">Loading…</span></button>
   </div>
   <div id="days" role="group" aria-label="Pick a day"></div>
+  <div id="spot-menu" role="menu" aria-label="Beaches" hidden></div>
 </header>
+<div id="spot-scrim" hidden></div>
 <main class="first-load">
   <progress id="loader" value="0" aria-hidden="true"></progress>
   <!-- The day shown sits between the days before and after it; app.js fills these. -->

@@ -9,32 +9,45 @@
 // so this can’t be used as an open proxy.
 //
 // It also keeps a record of what sources forget: every hour, cron on the server calls
-// /collect, which saves the beach’s water quality posting (SFPUC keeps no history) and
-// the latest run’s wave height (runs vanish after about two days) to the
-// plunge.history table. /history?date= reads a past day back, and /posted-since says
-// how long the current posting has stood.
+// /collect, which saves each beach’s water quality posting (SFPUC keeps no history) and
+// Crissy East’s latest wave run (runs vanish after about two days) to the
+// plunge.history table. /history?date=&spot= reads a past day back, and
+// /posted-since?spot= says how long the current posting has stood. Routes that take a
+// spot answer for Crissy East without one, and name the spot they answer for.
 
 import { nearestWater, readFields } from "./grib2.ts";
 
-const SPOT = "crissy-east";
+// Each beach’s SFPUC stations: the worst of them counts (see js/spots/). The first is
+// the default, for requests that name no spot.
+const SPOTS: Record<string, { stations: string[] }> = {
+  "crissy-east": { stations: ["4612"] },
+  "baker-beach": { stations: ["4608", "4610", "4609"] },
+};
+const DEFAULT_SPOT = "crissy-east";
 const TIME_ZONE = "America/Los_Angeles";
 
-// How long each route’s answer is reused, and the answers themselves.
-const ROUTES: Record<string, { cacheMs: number; load: () => Promise<unknown> }> = {
+// How long each route’s answer is reused, and the answers themselves. Routes marked
+// bySpot answer for one beach.
+const ROUTES: Record<string, { cacheMs: number; bySpot?: boolean; load: (spot: string) => Promise<unknown> }> = {
   "water-temp": { cacheMs: 10 * 60e3, load: waterTemp },
   // A new wave run comes out about every 12 hours, some 7 hours after its start time.
+  // Crissy East’s only: Baker Beach’s waves come from CDIP, which browsers can read.
   "waves": { cacheMs: 30 * 60e3, load: waves },
-  "water-quality": { cacheMs: 10 * 60e3, load: waterQuality },
+  "water-quality": { cacheMs: 10 * 60e3, bySpot: true, load: waterQuality },
   // SFO reports once an hour, at :56. The Iowa Environmental Mesonet is a volunteer
   // service that limits how often one address asks, so every phone shares one copy.
   "rain": { cacheMs: 30 * 60e3, load: rain },
-  "posted-since": { cacheMs: 10 * 60e3, load: postedSince },
+  "posted-since": { cacheMs: 10 * 60e3, bySpot: true, load: postedSince },
 };
 const cache = new Map<string, { at: number; body: unknown }>();
-async function cached(route: string) {
+async function cached(route: string, spot = DEFAULT_SPOT) {
   const spec = ROUTES[route];
-  let hit = cache.get(route);
-  if (!hit || Date.now() - hit.at > spec.cacheMs) cache.set(route, hit = { at: Date.now(), body: await spec.load() });
+  const key = spec.bySpot ? `${route}:${spot}` : route;
+  let hit = cache.get(key);
+  if (!hit || Date.now() - hit.at > spec.cacheMs) {
+    const body = await spec.load(spot);
+    cache.set(key, hit = { at: Date.now(), body: spec.bySpot ? { spot, ...body as object } : body });
+  }
   return hit.body;
 }
 
@@ -69,10 +82,14 @@ async function waterTemp() {
   };
 }
 
-// The beach’s posting from SFPUC, the feed behind
+// A beach’s posting from SFPUC, the feed behind
 // https://webapps.sfpuc.org/sapps/beachesandbay.html: XML wrapping a JSON array of
-// stations. Same rules as js/sources.js.
-async function waterQuality() {
+// stations. The worst of the beach’s stations, by the same rules as js/sources.js
+// (worstPosting): any posted makes it posted, for an overflow if any was, as of the
+// latest posted sample; clean only when every station is, as of the oldest sample;
+// otherwise not sampled. A station missing from the feed counts as not sampled.
+type Posting = { status: string; reason?: string; sampled: string | null };
+async function waterQuality(spot: string) {
   const res = await fetch("https://infrastructure.sfwater.org/lims.asmx/getBeaches");
   if (!res.ok) throw new Error(`SFPUC responded ${res.status}`);
   const inner = (await res.text()).match(/<string[^>]*>([\s\S]*)<\/string>/)?.[1];
@@ -80,18 +97,34 @@ async function waterQuality() {
   const decoded = inner.replace(/&(quot|amp|lt|gt|apos|#39);/g, (_, e: string) =>
     ({ quot: '"', amp: "&", lt: "<", gt: ">", apos: "'", "#39": "'" } as Record<string, string>)[e]);
   // deno-lint-ignore no-explicit-any
-  const station = JSON.parse(decoded).find((x: any) => x.stationid === "4612");
-  if (!station) throw new Error("Station 4612 not in the SFPUC feed");
-  const [m, d, y] = (station.sample_date ?? "").split("/").map(Number);
-  const status = station.s_color === "R" || station.cso || (station.posted && ["R", "G"].includes(station.p_color)) ? "posted"
-    : station.s_color === "Y" || station.s_color === "W" ? "unsampled"
-    : "clean";
-  return {
-    status,
-    // cso names the outfall that overflowed; any other posting is for bacteria.
-    ...(status === "posted" && { reason: station.cso ? "overflow" : "bacteria" }),
-    sampled: m ? `20${String(y).padStart(2, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null,
-  };
+  const feed = JSON.parse(decoded) as any[];
+  const ids = SPOTS[spot].stations;
+  const found = ids.map(id => feed.find(x => x.stationid === id));
+  if (!found.some(Boolean)) throw new Error(`Station ${ids.join(", ")} not in the SFPUC feed`);
+  // deno-lint-ignore no-explicit-any
+  const all: Posting[] = found.map((station: any) => {
+    if (!station) return { status: "unsampled", sampled: null };
+    const [m, d, y] = (station.sample_date ?? "").split("/").map(Number);
+    const status = station.s_color === "R" || station.cso || (station.posted && ["R", "G"].includes(station.p_color)) ? "posted"
+      : station.s_color === "Y" || station.s_color === "W" ? "unsampled"
+      : "clean";
+    return {
+      status,
+      // cso names the outfall that overflowed; any other posting is for bacteria.
+      ...(status === "posted" && { reason: station.cso ? "overflow" : "bacteria" }),
+      sampled: m ? `20${String(y).padStart(2, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null,
+    };
+  });
+  const posted = all.filter(p => p.status === "posted");
+  const dates = (ps: Posting[]) => ps.map(p => p.sampled).filter((x): x is string => !!x).sort();
+  if (posted.length) {
+    return { status: "posted", reason: posted.some(p => p.reason === "overflow") ? "overflow" : "bacteria",
+      sampled: dates(posted).at(-1) ?? null };
+  }
+  if (all.every(p => p.status === "clean")) {
+    return { status: "clean", sampled: dates(all).length === all.length ? dates(all)[0] : null };
+  }
+  return { status: "unsampled", sampled: dates(all).at(-1) ?? null };
 }
 
 // Wave height forecast for Crissy Field East Beach from the NWS Nearshore Wave
@@ -199,22 +232,25 @@ async function db(path: string, init: RequestInit = {}) {
 
 type Row = { spot: string; kind: string; date: string; hour: number; value: unknown };
 
-// Saves this hour’s posting, and the wave height for every hour from the start of
+// Saves this hour’s posting at each beach, and Crissy East’s wave height for every hour from the start of
 // yesterday to now that the latest run covers (a newer run’s value replaces an older
 // one’s). Each source is saved on its own: one failing doesn’t stop the other.
 async function collect() {
   const now = local(Date.now());
   const rows: Row[] = [];
   const errors: Record<string, string> = {};
-  try {
-    rows.push({ spot: SPOT, kind: "waterQuality", ...now, value: await cached("water-quality") });
-  } catch (err) { errors.waterQuality = (err as Error).message; }
+  for (const spot of Object.keys(SPOTS)) {
+    try {
+      const { spot: _, ...value } = await cached("water-quality", spot) as Posting & { spot: string };
+      rows.push({ spot, kind: "waterQuality", ...now, value });
+    } catch (err) { errors[`waterQuality:${spot}`] = (err as Error).message; }
+  }
   try {
     const run = await cached("waves") as Awaited<ReturnType<typeof waves>>;
     const since = Date.now() - 2 * 864e5;
     for (const { time, ft } of run.hours) {
       const ms = Date.parse(time);
-      if (ms > since && ms <= Date.now()) rows.push({ spot: SPOT, kind: "waves", ...local(ms), value: { ft, run: run.run } });
+      if (ms > since && ms <= Date.now()) rows.push({ spot: DEFAULT_SPOT, kind: "waves", ...local(ms), value: { ft, run: run.run } });
     }
   } catch (err) { errors.waves = (err as Error).message; }
   if (rows.length) {
@@ -227,9 +263,9 @@ async function collect() {
 // When the current posting began: the first hour of the latest unbroken run of the
 // same status in the record, looking back 45 days. A run older than that reports the
 // oldest hour looked at, which is later than the truth but still a posting that old.
-async function postedSince() {
+async function postedSince(spot: string) {
   const from = local(Date.now() - 45 * 864e5).date;
-  const rows = await db(`?spot=eq.${SPOT}&kind=eq.waterQuality&date=gte.${from}` +
+  const rows = await db(`?spot=eq.${spot}&kind=eq.waterQuality&date=gte.${from}` +
     `&select=recorded_at,value&order=date.desc,hour.desc`) as { recorded_at: string; value: { status: string } }[];
   const status = rows[0]?.value.status;
   if (!status) throw new Error("No postings recorded");
@@ -244,8 +280,8 @@ async function postedSince() {
 // A past day: the last posting recorded that day, the wave height by hour, and the
 // buoy’s water temperature by hour (the reading nearest each half past, within half
 // an hour; the buoy file itself keeps 45 days, so this isn’t recorded).
-async function history(date: string) {
-  const rows = await db(`?spot=eq.${SPOT}&date=eq.${date}&select=kind,hour,value&order=hour`) as Row[];
+async function history(date: string, spot: string) {
+  const rows = await db(`?spot=eq.${spot}&date=eq.${date}&select=kind,hour,value&order=hour`) as Row[];
   const waves: Record<number, number> = {};
   let waterQuality = null;
   for (const r of rows) {
@@ -262,24 +298,26 @@ async function history(date: string) {
       if (!best || Math.abs(r.ms - halfPast) < Math.abs(best.ms - halfPast)) waterTemp[at.hour] = r;
     }
   } catch { /* water temperature is left out; the rest still answers */ }
-  return { date, waterQuality, waves, waterTemp };
+  return { spot, date, waterQuality, waves, waterTemp };
 }
 
 Deno.serve(async req => {
   const url = new URL(req.url);
   const route = url.pathname.replace(/\/+$/, "").split("/").pop() ?? "";
   if (req.method !== "GET") return Response.json({ error: "Not found" }, { status: 404 });
+  const spot = url.searchParams.get("spot") ?? DEFAULT_SPOT;
+  if (!SPOTS[spot]) return Response.json({ error: "Unknown spot" }, { status: 400 });
   try {
     if (route === "collect") return Response.json(await collect(), { headers: { "Cache-Control": "no-store" } });
     if (route === "history") {
       const date = url.searchParams.get("date") ?? "";
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return Response.json({ error: "date must be YYYY-MM-DD" }, { status: 400 });
-      return Response.json(await history(date), { headers: { "Cache-Control": "public, max-age=600", "Vary": "Origin" } });
+      return Response.json(await history(date, spot), { headers: { "Cache-Control": "public, max-age=600", "Vary": "Origin" } });
     }
     if (!ROUTES[route]) return Response.json({ error: "Not found" }, { status: 404 });
     // The gateway’s CORS header echoes the requesting site, so caches must keep one
     // copy per site (Vary: Origin) or a copy fetched from one site breaks another.
-    return Response.json(await cached(route),
+    return Response.json(await cached(route, spot),
       { headers: { "Cache-Control": `public, max-age=${ROUTES[route].cacheMs / 1000}`, "Vary": "Origin" } });
   } catch (err) {
     return Response.json({ error: (err as Error).message }, { status: 502 });

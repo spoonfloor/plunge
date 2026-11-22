@@ -79,6 +79,61 @@ async function offshoreWaves(spot, dates) {
     link: "https://open-meteo.com/en/docs/marine-weather-api" };
 }
 
+// CDIP’s nearshore model (MOP) at the spot’s site, by day and local hour: { nearshore:
+// { hsM, tpS, depthM } }, for model.js to work out the breaking height. Past hours from
+// the hourly nowcast, the rest from the 3-hourly forecast, filled in between its steps.
+// Read through OPeNDAP, which returns plain text and allows browsers to read it.
+const CDIP = "https://thredds.cdip.ucsd.edu/thredds/dodsC/cdip/model/MOP_alongshore";
+async function cdipWaves(spot, dates) {
+  const { site, siteName } = spot.waves;
+  const getText = async url => {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.text();
+  };
+  // The nowcast holds every hour since spring; only the last three days are read.
+  const length = Number((await getText(`${CDIP}/${site}_nowcast.nc.dds`)).match(/waveTime\[waveTime = (\d+)\]/)?.[1]);
+  if (!length) throw new Error("No nowcast length");
+  const last = `[${Math.max(0, length - 72)}:1:${length - 1}]`;
+  const [nowcast, forecast] = await Promise.all([
+    getText(`${CDIP}/${site}_nowcast.nc.ascii?${["waveTime", "waveHs", "waveTp"].map(v => v + last).join(",")},metaWaterDepth`),
+    getText(`${CDIP}/${site}_ecmwf_fc.nc.ascii?waveTime,waveHs,waveTp,metaWaterDepth`),
+  ]).then(texts => texts.map(readOpendap));
+  const depthM = nowcast.metaWaterDepth[0];
+  const data = byDay(dates);
+  const put = (ms, hsM, tpS) => {
+    const at = zonedParts(ms, spot.timeZone);
+    if (data[at.date] && at.minute === 0 && Number.isFinite(hsM) && hsM >= 0) data[at.date][at.hour] = { nearshore: { hsM, tpS, depthM } };
+  };
+  const nowcastEnd = Math.max(...nowcast.waveTime) * 1e3;
+  nowcast.waveTime.forEach((t, i) => put(t * 1e3, nowcast.waveHs[i], nowcast.waveTp[i]));
+  forecast.waveTime.forEach((t, i) => {
+    const next = forecast.waveTime[i + 1];
+    for (let ms = t * 1e3; ms < (next ?? t + 1) * 1e3; ms += HOUR) {
+      if (ms <= nowcastEnd) continue;
+      const f = next ? (ms / 1e3 - t) / (next - t) : 0;
+      const hs = next ? forecast.waveHs[i] + (forecast.waveHs[i + 1] - forecast.waveHs[i]) * f : forecast.waveHs[i];
+      put(ms, hs, forecast.waveTp[f < 0.5 ? i : i + 1]);
+    }
+  });
+  if (isEmpty(data)) throw new Error("No wave heights for these days");
+  return { data, label: `CDIP nearshore wave model, ${siteName}, broken at the beach`,
+    link: `https://cdip.ucsd.edu/mops/?mop=${site}` };
+}
+// OPeNDAP’s plain-text answer → { name: [numbers] }. After a line of dashes, each variable
+// is “name[3]” then its values on the next line, or “name, value” for a single value.
+function readOpendap(text) {
+  const body = text.split(/^-+$/m)[1];
+  if (!body) throw new Error("Unexpected response");
+  const out = {};
+  for (const block of body.trim().split(/\n\s*\n/)) {
+    const [head, ...rest] = block.trim().split("\n");
+    const [name, ...inline] = head.split(",");
+    out[name.replace(/\[.*$/, "").trim()] = [...inline, ...rest].join(",").split(",").map(Number);
+  }
+  return out;
+}
+
 // Each returns { data, link }: data in model.js’s shape, link a page a person can read.
 // The latest water temperature. The Presidio station sits inside the Bay, closest to
 // the beach. When it has no recent reading, fall back to the SF Bar buoy outside the
@@ -128,6 +183,43 @@ async function pastWaterTemp(spot, date, shared, hours) {
     }
   } catch { /* hours with no reading stay empty */ }
   return Object.keys(hours).length > 0;
+}
+
+// One SFPUC station’s posting: { status, reason, sampled }. Same rules as the SFPUC
+// page: a red status, a posted sign or a sewer discharge means posted; yellow or white
+// means not sampled. cso names the outfall that overflowed; any other posting is for
+// bacteria. A station missing from the feed counts as not sampled.
+function posting(station) {
+  if (!station) return { status: "unsampled", sampled: null };
+  const [m, d, y] = (station.sample_date ?? "").split("/").map(Number);
+  const status = station.s_color === "R" || station.cso || (station.posted && ["R", "G"].includes(station.p_color)) ? "posted"
+    : station.s_color === "Y" || station.s_color === "W" ? "unsampled"
+    : "clean";
+  return {
+    status,
+    ...(status === "posted" && { reason: station.cso ? "overflow" : "bacteria" }),
+    sampled: m ? `20${String(y).padStart(2, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null,
+  };
+}
+
+// A beach’s posting from its stations (ids, from the feed’s array): the worst of them. Any
+// posted makes it posted, for an overflow if any was, as of the latest posted sample. It’s
+// clean only when every station is, as of the oldest sample; otherwise not sampled. The
+// server (server/functions/plunge) does the same.
+export function worstPosting(feed, ids) {
+  const found = ids.map(id => feed.find(x => x.stationid === id));
+  if (!found.some(Boolean)) throw new Error(`Station ${ids.join(", ")} not in the feed`);
+  const all = found.map(posting);
+  const posted = all.filter(p => p.status === "posted");
+  const dates = ps => ps.map(p => p.sampled).filter(Boolean).sort();
+  if (posted.length) {
+    return { status: "posted", reason: posted.some(p => p.reason === "overflow") ? "overflow" : "bacteria",
+      sampled: dates(posted).at(-1) ?? null };
+  }
+  if (all.every(p => p.status === "clean")) {
+    return { status: "clean", sampled: dates(all).length === all.length ? dates(all)[0] : null };
+  }
+  return { status: "unsampled", sampled: dates(all).at(-1) ?? null };
 }
 
 const FETCHERS = {
@@ -188,6 +280,7 @@ const FETCHERS = {
   // neither covers (the tail of the last day) or when both fail, an estimate from the
   // offshore forecast stands in.
   async waves(spot, dates, shared) {
+    if (spot.waves.source === "cdip") return cdipWaves(spot, dates);
     const today = zonedParts(Date.now(), spot.timeZone).date;
     const data = byDay(dates);
     let run = null;
@@ -379,7 +472,8 @@ const FETCHERS = {
     const today = zonedParts(Date.now(), spot.timeZone).date;
     const recorded = Object.fromEntries(await Promise.all(dates.filter(d => d < today).map(async date =>
       [date, await shared.history(date).then(h => h.waterQuality, () => null) ?? { status: "unrecorded" }])));
-    const sincePromise = getJson(`${SERVER}/posted-since`).catch(() => null);
+    const sincePromise = getJson(withQuery(`${SERVER}/posted-since`, { spot: spot.id }))
+      .then(json => shared.ours(json) ? json : null, () => null);
     const res = await fetch("https://infrastructure.sfwater.org/lims.asmx/getBeaches");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const xml = await res.text();
@@ -387,23 +481,10 @@ const FETCHERS = {
     if (!inner) throw new Error("Unexpected response");
     const decoded = inner.replace(/&(quot|amp|lt|gt|apos|#39);/g, (_, e) =>
       ({ quot: '"', amp: "&", lt: "<", gt: ">", apos: "'", "#39": "'" })[e]);
-    const station = JSON.parse(decoded).find(x => x.stationid === spot.waterQuality.station);
-    if (!station) throw new Error(`Station ${spot.waterQuality.station} not in the feed`);
-    const [m, d, y] = (station.sample_date ?? "").split("/").map(Number);
-    // Same rules as the SFPUC page: a red status, a posted sign or a sewer discharge
-    // means posted; yellow or white means not sampled. cso names the outfall that
-    // overflowed; any other posting is for bacteria.
-    const status = station.s_color === "R" || station.cso || (station.posted && ["R", "G"].includes(station.p_color)) ? "posted"
-      : station.s_color === "Y" || station.s_color === "W" ? "unsampled"
-      : "clean";
-    const reading = {
-      status,
-      ...(status === "posted" && { reason: station.cso ? "overflow" : "bacteria" }),
-      sampled: m ? `20${String(y).padStart(2, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null,
-    };
+    const reading = worstPosting(JSON.parse(decoded), spot.waterQuality.stations);
     const since = await sincePromise;
     // To the hour: the server records once an hour, a few minutes past.
-    const sinceMs = since?.status === status ? Date.parse(since.since) - Date.parse(since.since) % HOUR : null;
+    const sinceMs = since?.status === reading.status ? Date.parse(since.since) - Date.parse(since.since) % HOUR : null;
     // The posting’s start applies to any day it covers: one that began before the day ended.
     const withSince = (q, date) => q.status === "posted" && sinceMs && sinceMs < zonedToMs(`${addDays(date, 1)} 00:00`, spot.timeZone)
       ? { ...q, sinceMs } : q;
@@ -474,7 +555,11 @@ export async function loadAll(spot, dates, onProgress) {
     nwsHourly: () => hourly ??= nwsPoint().then(p => getJson(p.properties.forecastHourly)),
     nwsGrid: () => grid ??= nwsPoint().then(p => getJson(p.properties.forecastGridData)),
     // What the server recorded for a past day (see server/functions/plunge).
-    history: date => history[date] ??= getJson(withQuery(`${SERVER}/history`, { date })),
+    history: date => history[date] ??= getJson(withQuery(`${SERVER}/history`, { date, spot: spot.id }))
+      .then(json => { if (!shared.ours(json)) throw new Error("Not recorded for this spot"); return json; }),
+    // Whether a server answer is for this spot. A server from before spots says nothing,
+    // and was Crissy East’s alone.
+    ours: json => (json.spot ?? "crissy-east") === spot.id,
   };
   const results = await Promise.all(keys.map(async key => {
     const result = await loadOne(key);

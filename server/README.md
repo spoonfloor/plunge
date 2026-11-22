@@ -6,11 +6,13 @@
 |---|---|
 | `GET /functions/v1/plunge/water-temp` | Latest water temperature from NDBC buoy 46237 (San Francisco Bar) |
 | `GET /functions/v1/plunge/waves` | Hourly wave height at Crissy Field East Beach from the latest NWS Nearshore Wave Prediction System run (SF Bay Area grid). Each run is an 18 MB GRIB2 file; `grib2.ts` reads the one grid point at the beach. |
-| `GET /functions/v1/plunge/water-quality` | The beach’s SFPUC posting: `posted` (with `reason`: `overflow` or `bacteria`), `clean` or `unsampled`, and the sample date |
+| `GET /functions/v1/plunge/water-quality?spot=` | The beach’s SFPUC posting (the worst of its stations): `posted` (with `reason`: `overflow` or `bacteria`), `clean` or `unsampled`, and the sample date |
 | `GET /functions/v1/plunge/rain` | Measured rain at SFO by hour for the last 8 days, from the Iowa Environmental Mesonet’s METAR archive. Cached 30 minutes: the Mesonet limits how often one address asks. |
-| `GET /functions/v1/plunge/posted-since` | The current posting status and when it began: the first hour of the latest unbroken run of that status in `plunge.history` |
-| `GET /functions/v1/plunge/collect` | Records what sources forget into the `plunge.history` table: this hour’s posting, and the latest wave run’s height for each past hour since yesterday. Cron calls it hourly. |
-| `GET /functions/v1/plunge/history?date=YYYY-MM-DD` | A past day: the last posting recorded, wave height by hour, and the buoy’s water temperature by hour (read from the buoy’s 45-day file, not recorded) |
+| `GET /functions/v1/plunge/posted-since?spot=` | The current posting status and when it began: the first hour of the latest unbroken run of that status in `plunge.history` |
+| `GET /functions/v1/plunge/collect` | Records what sources forget into the `plunge.history` table: this hour’s posting at each beach, and the latest wave run’s height for each past hour since yesterday. Cron calls it hourly. |
+| `GET /functions/v1/plunge/history?date=YYYY-MM-DD&spot=` | A past day: the last posting recorded, wave height by hour, and the buoy’s water temperature by hour (read from the buoy’s 45-day file, not recorded) |
+
+`spot` is `crissy-east` (the default) or `baker-beach`; answers that take one name it in a `spot` field. The app ignores an answer without one for any beach but Crissy East, so it works against an older deploy.
 
 ## History
 

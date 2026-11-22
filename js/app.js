@@ -1,7 +1,7 @@
 // Offline support (see sw.js). Browsers without service workers just skip it.
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 
-import spot from "./spots/crissy-east.js";
+import { SPOTS } from "./spots/index.js";
 import { forDate, loadAll } from "./sources.js";
 import { advisoryParagraphs, advisorySummary, assessHour, currentAt, feet, showsRain, skyKind, skyLine, summarizeDay, thresholds,
   tideAt, waterAdvisories } from "./model.js";
@@ -24,8 +24,15 @@ const FACTORS = [
   { key: "waterTemp", name: "Water temperature" },
   { key: "waterQuality", name: "Water quality", linkTo: "SFPUC" },
 ];
-const THRESHOLDS = thresholds(spot);
 const REFRESH_AFTER_MS = 15 * 60e3;
+
+// The beach shown, picked from the menu under its name and remembered on this device.
+// Every beach loads together, so the menu can show each one’s rating now and switching
+// is instant; the day and hour picked stay as they were.
+const SPOT_KEY = "plunge:spot";
+let spot = (() => {
+  try { return SPOTS.find(s => s.id === localStorage.getItem(SPOT_KEY)) ?? SPOTS[0]; } catch { return SPOTS[0]; }
+})();
 
 const $ = id => document.getElementById(id);
 const clock = ms => new Intl.DateTimeFormat("en-US", { timeZone: spot.timeZone, hour: "numeric", minute: "2-digit" }).format(ms);
@@ -101,9 +108,11 @@ const skyIcon = sky => svg("svg", { class: "sky-icon", viewBox: "0 0 24 24", "ar
 
 // date: the day shown. selected: the hour picked, or null for “now” (on other days,
 // the hour it is now). Both carry across days, so swiping compares the same hour.
+// spots: each beach’s loaded days, alerts, links and sources, by id; days, alerts and
+// links are the shown beach’s.
 const state = { today: null, dates: [], days: {}, alerts: null, date: null, selected: null,
   open: new Set(), rainOpen: false, summaryOpen: false, advisoriesOpen: false, lastLoad: 0, loading: false,
-  links: {} };
+  links: {}, spots: {} };
 
 async function refresh() {
   if (state.loading) return;
@@ -113,27 +122,18 @@ async function refresh() {
   const today = zonedParts(Date.now(), spot.timeZone).date;
   const dates = Array.from({ length: DAYS_BACK + 1 + DAYS_AHEAD }, (_, i) => addDays(today, i - DAYS_BACK));
   try {
-    const { data, sources } = await loadAll(spot, dates, (done, total) => {
-      $("loader").max = total;
-      $("loader").value = done;
-    });
+    const progress = SPOTS.map(() => [0, 1]);
+    const loaded = await Promise.all(SPOTS.map((s, k) => loadAll(s, dates, (done, total) => {
+      progress[k] = [done, total];
+      $("loader").max = progress.reduce((a, p) => a + p[1], 0);
+      $("loader").value = progress.reduce((a, p) => a + p[0], 0);
+    })));
     if (today !== state.today) { state.date = today; state.selected = null; } // a new day starts back at “now”
     state.today = today;
     state.dates = dates;
-    state.alerts = data.alerts;
-    state.days = Object.fromEntries(dates.map(date => {
-      const day = forDate(data, date);
-      const hours = [];
-      for (let hour = spot.firstHour; hour <= spot.lastHour; hour++) {
-        hours.push(assessHour(hour, zonedToMs(`${date} ${hour}:00`, spot.timeZone), day, spot));
-      }
-      // The forecast’s sky where it has the hour; what a station reported where it doesn’t.
-      return [date, { hours, sky: { ...day.skyObserved, ...day.sky }, tide: data.tide, currents: data.currents }];
-    }));
-    state.links = Object.fromEntries(sources.filter(s => s.link).map(s => [s.key, s.link]));
+    SPOTS.forEach((s, k) => { state.spots[s.id] = assessSpot(s, dates, loaded[k]); });
     state.lastLoad = Date.now();
-    renderStatus(sources);
-    render();
+    showSpot(spot);
   } finally {
     document.querySelector("main").classList.remove("first-load");
     fold(); // the page moved under the loader, so measure the strip again
@@ -141,6 +141,81 @@ async function refresh() {
     $("refresh").disabled = false;
   }
 }
+
+// One beach’s load, rated hour by hour for every day.
+function assessSpot(s, dates, { data, sources }) {
+  const days = Object.fromEntries(dates.map(date => {
+    const day = forDate(data, date);
+    const hours = [];
+    for (let hour = s.firstHour; hour <= s.lastHour; hour++) {
+      hours.push(assessHour(hour, zonedToMs(`${date} ${hour}:00`, s.timeZone), day, s));
+    }
+    // The forecast’s sky where it has the hour; what a station reported where it doesn’t.
+    return [date, { hours, sky: { ...day.skyObserved, ...day.sky }, tide: data.tide, currents: data.currents }];
+  }));
+  return { days, alerts: data.alerts, sources,
+    links: Object.fromEntries(sources.filter(x => x.link).map(x => [x.key, x.link])) };
+}
+
+// Show beach s: its name, its data and the page drawn from them.
+function showSpot(s) {
+  spot = s;
+  try { localStorage.setItem(SPOT_KEY, s.id); } catch { /* storage unavailable */ }
+  $("spot-name").textContent = s.shortName;
+  const loaded = state.spots[s.id];
+  if (!loaded) return;
+  Object.assign(state, { days: loaded.days, alerts: loaded.alerts, links: loaded.links });
+  renderStatus(loaded.sources);
+  render();
+}
+
+// ---- Picking a beach -------------------------------------------------------------------
+
+// The menu under the beach’s name: every beach with its rating now (the hour “now” lands
+// on, the same one the page opens to), a check on the one shown.
+function spotRatingNow(s) {
+  const hours = state.spots[s.id]?.days[state.today]?.hours;
+  const hour = Math.min(s.lastHour, Math.max(s.firstHour, zonedParts(Date.now(), s.timeZone).hour));
+  return hours?.find(h => h.hour === hour)?.overall.level ?? null;
+}
+function openSpotMenu() {
+  const menu = $("spot-menu");
+  menu.replaceChildren(...SPOTS.map(s => {
+    const level = spotRatingNow(s);
+    const item = el("button", { type: "button", role: "menuitemradio", "aria-checked": String(s.id === spot.id),
+      "data-level": level },
+      svg("svg", { class: "check", viewBox: "0 0 16 16", "aria-hidden": "true" }, svg("path", { d: "M3 8.5l3.2 3.2L13 4.8" })),
+      el("span", { class: "spot-label" }, s.shortName),
+      level ? el("span", { class: "spot-level" }, el("span", { class: "visually-hidden" }, ", now "), LABELS[level]) : null);
+    item.addEventListener("click", () => {
+      closeSpotMenu(true);
+      if (s.id !== spot.id) showSpot(s);
+    });
+    return item;
+  }));
+  menu.hidden = $("spot-scrim").hidden = false;
+  $("spot-button").setAttribute("aria-expanded", "true");
+  (menu.querySelector('[aria-checked="true"]') ?? menu.firstElementChild)?.focus();
+}
+function closeSpotMenu(refocus) {
+  if ($("spot-menu").hidden) return;
+  $("spot-menu").hidden = $("spot-scrim").hidden = true;
+  $("spot-button").setAttribute("aria-expanded", "false");
+  if (refocus) $("spot-button").focus();
+}
+$("spot-button").addEventListener("click", () => $("spot-menu").hidden ? openSpotMenu() : closeSpotMenu(true));
+$("spot-scrim").addEventListener("click", () => closeSpotMenu(false));
+$("spot-menu").addEventListener("keydown", e => {
+  const items = [...$("spot-menu").children];
+  const i = items.indexOf(document.activeElement);
+  if (e.key === "Escape") closeSpotMenu(true);
+  else if (e.key === "ArrowDown") items[(i + 1) % items.length].focus();
+  else if (e.key === "ArrowUp") items[(i - 1 + items.length) % items.length].focus();
+  else if (e.key === "Tab") closeSpotMenu(false);
+  else return;
+  e.preventDefault();
+  e.stopPropagation();
+});
 
 // ---- Days and hours ------------------------------------------------------------------
 
@@ -389,7 +464,7 @@ function select(hour) {
 function dayCurve(key, selected, hours, events = null) {
   const W = 300, H = 126, plotW = W - 34, top = 12, bottom = H - 22;
   const points = hours.map(h => ({ hour: h.hour, f: h.factors[key] }));
-  const th = THRESHOLDS[key];
+  const th = thresholds(spot)[key];
 
   // Where an instant falls among the hours, as a fractional hour index (-1 outside them).
   const indexAt = ms => {
@@ -771,11 +846,13 @@ function goTo(date) {
 
 document.addEventListener("keydown", e => {
   if (!state.dates.length || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (!$("spot-menu").hidden) return; // the menu has the arrow keys while it’s open
   if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
   if (e.key === "ArrowRight") slide(1);
   else if (e.key === "ArrowLeft") slide(-1);
 });
 
+$("spot-name").textContent = spot.shortName;
 $("refresh").addEventListener("click", refresh);
 // Coming back to the app after a while (or the next morning) loads fresh data.
 document.addEventListener("visibilitychange", () => {
