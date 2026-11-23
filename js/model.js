@@ -324,7 +324,11 @@ export function assessWaterQuality(quality, rain, startMs, spot) {
   const sampleMs = q?.sampled ? zonedToMs(`${q.sampled} ${String(wq.sampleHour).padStart(2, "0")}:00`, tz) : null;
   // A stretch ending at ms lasts through the hour before it.
   const until = ms => partOfDay(ms - 1, startMs, tz);
-  const noRain = rain ? null : "Recent rainfall can affect water quality, but was not considered because of an error loading the data.";
+  // Without rain data, the card says what it left out and, where it would otherwise be
+  // OK, what to do instead; retry asks the app to offer loading again.
+  const unseen = rain ? null : "Rain data didn’t load, so recent rain wasn’t considered.";
+  const noRain = unseen && `${unseen} If it’s rained in the last ${r.afterHours / 24} days, use caution.`;
+  const retry = rain ? {} : { retry: true };
   const newer = x => x && (sampleMs == null || x.endMs > sampleMs) ? x : null;
   const heavy = newer(lastRain(rain, startMs, r.highIn)), light = newer(lastRain(rain, startMs, r.cautionIn));
   const unsure = x => x?.forecast && startMs - rain.observedUntilMs > r.sureForecastHours * H;
@@ -345,7 +349,7 @@ export function assessWaterQuality(quality, rain, startMs, spot) {
       return { level: "high", value: "Hazardous",
         why: `Posted for ${POSTED_FOR[q.reason] ?? "bacteria or a sewer overflow"}.`,
         notes: [`Warning until ${Number.isFinite(endsMs) ? until(endsMs) : "SFPUC resamples"}.`,
-          `Posted${on}${q.reason ? ` for ${POSTED_FOR[q.reason]}` : ""}.`, noRain].filter(Boolean) };
+          `Posted${on}${q.reason ? ` for ${POSTED_FOR[q.reason]}` : ""}.`, unseen].filter(Boolean), ...retry };
     }
     posted = `Warning posted${on}, not yet resampled.`;
   }
@@ -367,7 +371,8 @@ export function assessWaterQuality(quality, rain, startMs, spot) {
   if (posted || freshClean) {
     const next = nextRain(rain, startMs, r.cautionIn);
     return { level: "low", value: "OK",
-      notes: [next ? `Until ${partOfDay(next, startMs, tz)}, when rain is expected.` : null, status, noRain].filter(Boolean) };
+      notes: [next ? `Until ${partOfDay(next, startMs, tz)}, when rain is expected.` : null, status, noRain].filter(Boolean),
+      ...retry };
   }
   if (!q) return unknown(quality ? "No record of this day’s posting." : "SFPUC didn’t load.");
   switch (q.status) {

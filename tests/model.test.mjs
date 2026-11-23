@@ -231,8 +231,8 @@ test("water quality: a posting with nothing to count from never ages", () => {
   assert.deepEqual(wq(overflow, dry, "2026-11-30 10:00").notes, ["Warning until SFPUC resamples.", "Posted Nov 18 for a sewer overflow."]);
   // No rain data: there’s no telling whether rain restarted it.
   assert.deepEqual(wq(bacteria, null, "2026-11-30 10:00").notes,
-    ["Warning until SFPUC resamples.", "Posted Nov 9 for high bacteria.", "Recent rainfall can affect water quality, but was not considered because of an error loading the data."]);
-  assert.deepEqual(wq(clean, null, "2026-11-12 10:00").notes, ["Last sample, Nov 9, was clean.", "Recent rainfall can affect water quality, but was not considered because of an error loading the data."]);
+    ["Warning until SFPUC resamples.", "Posted Nov 9 for high bacteria.", "Rain data didn’t load, so recent rain wasn’t considered."]);
+  assert.deepEqual(wq(clean, null, "2026-11-12 10:00").notes, ["Last sample, Nov 9, was clean.", "Rain data didn’t load, so recent rain wasn’t considered. If it’s rained in the last 3 days, use caution."]);
 });
 
 test("water quality: times are parts of the day, said from the hour shown", () => {

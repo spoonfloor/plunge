@@ -307,6 +307,11 @@ main.first-load #loader {
   letter-spacing: -0.01em; }
 .factor .value + .note { margin-top: 6px; }
 .factor .note { margin: 0; font-size: 15px; line-height: 1.45; color: var(--text-muted); }
+/* Reads as a link at the end of the note: the text’s own size, in the accent color. */
+.factor .retry { margin: 0; padding: 0; border: 0; background: none; font: inherit; font-weight: 600;
+  color: var(--accent-color); cursor: pointer; }
+.factor .retry:disabled { opacity: 0.5; cursor: default; }
+.factor .retry:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; border-radius: 2px; }
 
 .advisories { margin-top: 10px; }
 .advisories summary { display: flex; justify-content: space-between; align-items: center; gap: 12px;

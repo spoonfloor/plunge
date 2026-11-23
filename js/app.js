@@ -377,7 +377,10 @@ function dayPanel(date, side) {
           el("span", { class: "rating" }, rated ? LABELS[f.level] : f.trend, curve ? el("span", { class: "chevron", "aria-hidden": "true" }) : null)),
         el("p", { class: "value" }, f.value),
         graph,
-        f.notes.map(n => el("p", { class: "note" }, n)));
+        // A factor missing data it needs offers to load everything again, after its last note.
+        f.notes.map((n, k) => el("p", { class: "note" }, n,
+          f.retry && k === f.notes.length - 1 ? [" ", el("button", { type: "button", class: "retry" }, "Retry")] : null)));
+      card.querySelector(".retry")?.addEventListener("click", refresh);
       card.querySelector(".expand")?.addEventListener("click", () => {
         state.open.has(key) ? state.open.delete(key) : state.open.add(key);
         render();
