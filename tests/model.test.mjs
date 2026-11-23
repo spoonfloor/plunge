@@ -117,8 +117,8 @@ const overflow = { status: "posted", reason: "overflow", sampled: "2026-11-18" }
 
 test("water quality: a clean sample stands for 8 days, through drizzle", () => {
   assert.deepEqual(wq(clean, dry, "2026-11-12 10:00"), { level: "low", value: "OK", notes: ["Last sample, Nov 9, was clean."] });
-  assert.equal(wq(clean, dry, "2026-11-17 09:00").level, "low");
-  assert.deepEqual(wq(clean, dry, "2026-11-17 10:00"), { level: "unknown", value: "Unavailable", notes: ["No sample since Nov 9."] });
+  assert.equal(wq(clean, dry, "2026-11-17 08:00").level, "low");
+  assert.deepEqual(wq(clean, dry, "2026-11-17 09:00"), { level: "unknown", value: "Unavailable", notes: ["No sample since Nov 9."] });
   assert.equal(wq(clean, rainSeries({ "2026-11-11 13:00": 0.05 }), "2026-11-11 15:00").level, "low");
 });
 
@@ -163,9 +163,11 @@ test("water quality: forecast rain never rates the water, only gets a mention", 
 });
 
 test("water quality: the newest evidence wins", () => {
-  const storm = rainSeries({ "2026-11-18 09:00": 1, "2026-11-19 09:00": 0.6, "2026-11-20 08:00": 0.3 });
-  const after = { status: "clean", sampled: "2026-11-20" }; // taken at 9 AM, after the last hour of rain
+  const storm = rainSeries({ "2026-11-18 09:00": 1, "2026-11-19 09:00": 0.6, "2026-11-20 07:00": 0.3 });
+  const after = { status: "clean", sampled: "2026-11-20" }; // taken at 8 AM, after the last hour of rain
   assert.deepEqual(wq(after, storm, "2026-11-20 12:00"), { level: "low", value: "OK", notes: ["Last sample, Nov 20, was clean."] });
+  // Rain still falling in the hour from 8 AM is after it, so the sample doesn’t clear it.
+  assert.equal(wq(after, rainSeries({ "2026-11-20 06:00": 0.17, "2026-11-20 08:00": 0.06 }), "2026-11-20 12:00").value, "Recent rain");
   // A sample from before the storm doesn’t clear it.
   assert.equal(wq({ status: "clean", sampled: "2026-11-17" }, storm, "2026-11-20 12:00").value, "Recent rain");
   // Rain measured after the sample counts again.
@@ -199,13 +201,13 @@ test("water quality: an advisory says what started it, when it ends, and what co
 });
 
 test("water quality: a posting is a warning for 72 hours after its sample, then no longer counts", () => {
-  const r = wq(bacteria, dry, "2026-11-12 08:00");
+  const r = wq(bacteria, dry, "2026-11-12 07:00");
   assert.deepEqual(r, { level: "high", value: "Hazardous", why: "Posted for high bacteria.",
     notes: ["Warning until this morning.", "Posted Nov 9 for high bacteria."] });
   assert.equal(overall({ current: { level: "unknown" }, waves: { level: "low" }, wind: { level: "low" }, waterTemp: { level: "low" },
     waterQuality: r }).why, "Posted for high bacteria.");
   // An old posting isn’t a clean sample: unrated, unless there’s been rain.
-  assert.deepEqual(wq(bacteria, dry, "2026-11-12 09:00"), { level: "unknown", value: "Unavailable", notes: ["Posted Nov 9, not resampled."] });
+  assert.deepEqual(wq(bacteria, dry, "2026-11-12 08:00"), { level: "unknown", value: "Unavailable", notes: ["Posted Nov 9, not resampled."] });
   assert.deepEqual(wq(bacteria, rainSeries({ "2026-11-10 09:00": 1 }), "2026-11-12 10:00"), { level: "caution", value: "Recent rain",
     notes: ["Last rain Tuesday at 9 AM. Advisory ends tomorrow morning.", "Posted Nov 9, not resampled."] });
   // An overflow posting too, named from when it began; rain, even heavy, doesn’t keep it High.

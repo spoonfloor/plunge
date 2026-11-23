@@ -80,8 +80,10 @@ export default {
     // the reading is too old to say what’s in the water. (An overflow posting is
     // resampled daily, so a standing one keeps a fresh sample.)
     postingHours: 72,
-    // SFPUC doesn’t say when it sampled, only the day. Mornings, by its schedule.
-    sampleHour: 9,
+    // SFPUC doesn’t say when it sampled, only the day. A best guess: crews start
+    // early and samples must reach the lab within hours. Earlier counts more of the
+    // day’s rain as after the sample, so errs toward caution.
+    sampleHour: 8,
   },
 
   // Rain washes runoff into the bay, and heavy rain overflows SF’s combined sewers.
