@@ -313,17 +313,24 @@ export function endAfterRain(rain, fromMs, atLeast, hours) {
 //   3. Posted but aged out, or a clean sample under 8 days old → OK (low).
 //   4. Anything else → unrated.
 //
-// Each card says, at most: when it changes (“Advisory until Monday morning, after
-// Thursday’s storm”, or “Until Tuesday afternoon, when rain is expected”), then what
-// SFPUC last said. Naming the storm (heavy rain, ≥ highIn in a day) or rain ties the
-// card to rain that may be days back, off the sky strip. Times are parts of the day,
-// not hours: they rest on forecasts.
+// Each card says, at most: when it changes, then what SFPUC last said. An advisory says
+// what started its 72 hours, when they run out, and what forecast rain could keep it
+// going: “Last rain yesterday at 2 AM. Advisory ends Tuesday night, but may be extended
+// by rain expected Monday night.” Its end counts from that rain alone, never from rain
+// still to come. Rain that has fallen is named by its hour; rain still to come, and
+// every end, by a part of the day, as they rest on forecasts (“Rain expected Tuesday
+// afternoon through Wednesday morning. Advisory would end Saturday morning.”). Days ahead are said from today,
+// by weekday, never as their own “today”: rain on them is still to come.
 export function assessWaterQuality(quality, rain, startMs, spot) {
   const wq = spot.waterQuality, r = spot.rain, tz = spot.timeZone;
   const q = quality?.status ? quality : null;
   const sampleMs = q?.sampled ? zonedToMs(`${q.sampled} ${String(wq.sampleHour).padStart(2, "0")}:00`, tz) : null;
+  // Days are said from the hour shown, or for a day ahead, from now (the last
+  // measurement), so a day ahead isn’t its own “today”.
+  const fromMs = rain ? Math.min(startMs, rain.observedUntilMs - 1) : startMs;
+  const when = ms => partOfDay(ms, fromMs, tz);
   // A stretch ending at ms lasts through the hour before it.
-  const until = ms => partOfDay(ms - 1, startMs, tz);
+  const until = ms => when(ms - 1);
   // Without rain data, the card says what it left out and, where it would otherwise be
   // OK, what to do instead; retry asks the app to offer loading again.
   const unseen = rain ? null : "Rain data didn’t load, so recent rain wasn’t considered.";
@@ -359,19 +366,25 @@ export function assessWaterQuality(quality, rain, startMs, spot) {
   const freshClean = q?.status === "clean" && sampleAge <= wq.cleanForDays * 24 * H;
   const status = posted ?? (freshClean ? `Last sample, ${shortDate(q.sampled)}, was clean.`
     : q?.status === "unsampled" ? "SFPUC isn’t sampling here right now." : null);
-  // An advisory lasts as long as any rain keeps it going (heavy rain is rain too, so
-  // light’s stretch always covers heavy’s). The rain behind it is named by its day, as a
-  // storm when it was heavy.
+  // The rain behind an advisory: the whole spell the last counting hour is part of, so
+  // an advisory shown in the middle of rain ends after it. Measured rain is named by its
+  // last hour; forecast rain by when it’s expected to start and stop counting.
   if (recent(light)) {
-    const cause = recent(heavy) ? heavy : light;
-    const after = `${dayName(stormDay(rain, cause.endMs, tz), startMs, tz)} ${cause === heavy ? "storm" : "rain"}`;
+    const spell = rainSpell(rain, light.endMs, r.cautionIn);
+    const endsMs = spell.endMs + r.afterHours * H;
+    const next = nextRain(rain, Math.max(startMs, spell.endMs - H), r.cautionIn);
+    const extended = next != null && next < endsMs ? `, but may be extended by rain expected ${when(next)}` : "";
+    const lastHourMs = spell.endMs - H;
+    const [from, to] = [when(spell.fromMs), until(spell.endMs)];
+    const cause = light.forecast ? `Rain expected ${from}${to === from ? "" : ` through ${to}`}.`
+      : `Last rain ${dayWord(lastHourMs, fromMs, tz)} at ${hourLabel(zonedParts(lastHourMs, tz).hour)}.`;
     return { level: "caution", value: "Recent rain",
-      notes: [`Advisory until ${until(endAfterRain(rain, light.endMs, r.cautionIn, r.afterHours))}, after ${after}.`, status].filter(Boolean) };
+      notes: [`${cause} Advisory ${light.forecast ? "would end" : "ends"} ${until(endsMs)}${extended}.`, status].filter(Boolean) };
   }
   if (posted || freshClean) {
     const next = nextRain(rain, startMs, r.cautionIn);
     return { level: "low", value: "OK",
-      notes: [next ? `Until ${partOfDay(next, startMs, tz)}, when rain is expected.` : null, status, noRain].filter(Boolean),
+      notes: [next ? `Until ${when(next)}, when rain is expected.` : null, status, noRain].filter(Boolean),
       ...retry };
   }
   if (!q) return unknown(quality ? "No record of this day’s posting." : "SFPUC didn’t load.");
@@ -384,28 +397,30 @@ export function assessWaterQuality(quality, rain, startMs, spot) {
 }
 const POSTED_FOR = { overflow: "a sewer overflow", bacteria: "high bacteria" };
 
-// The day of a storm that ended with the hour before endMs: the day with the most rain
-// in it, back to the last 24 dry hours (the window rain is counted in). 4.3″ over
-// Wednesday to Friday is Wednesday’s.
-function stormDay(rain, endMs, timeZone) {
-  const byDay = new Map();
-  for (let t = Math.floor((endMs - rain.startMs) / H) - 1, dry = 0; t >= 0 && dry < 24; t--) {
-    const x = rain.inches[t] ?? 0;
-    dry = x > 0 ? 0 : dry + 1;
-    const date = zonedParts(rain.startMs + t * H, timeZone).date;
-    byDay.set(date, (byDay.get(date) ?? 0) + x);
-  }
-  return [...byDay].reduce((a, b) => b[1] > a[1] ? b : a)[0];
+// The spell of rain around the counting hour that ends at endMs, through the wet hours
+// next to it that keep counting and are the same kind (measured or forecast): when it
+// starts to count (fromMs) and when its last counting hour ends (endMs). Measured rain
+// that goes on into the forecast is a spell that may be extended, not a longer one.
+function rainSpell(rain, endMs, atLeast) {
+  const forecast = t => rain.startMs + t * H >= rain.observedUntilMs;
+  const at = Math.floor((endMs - rain.startMs) / H) - 1;
+  const counts = t => t >= 0 && t < rain.inches.length && rain.inches[t] > 0 && daySum(rain, t) >= atLeast
+    && forecast(t) === forecast(at);
+  let first = at, last = at;
+  while (counts(first - 1)) first--;
+  while (counts(last + 1)) last++;
+  return { fromMs: rain.startMs + first * H, endMs: rain.startMs + (last + 1) * H };
 }
 
-// A day, said from the hour starting fromMs, as an owner: “today’s”, “yesterday’s”,
-// “tomorrow’s”, “Thursday’s”.
-function dayName(date, fromMs, timeZone) {
+// The day of an instant, said from the hour starting fromMs: “today”, “yesterday”,
+// “tomorrow”, “Thursday”.
+function dayWord(ms, fromMs, timeZone) {
+  const date = zonedParts(ms, timeZone).date;
   const days = (Date.parse(date) - Date.parse(zonedParts(fromMs, timeZone).date)) / 864e5;
-  if (days === 0) return "today’s";
-  if (days === -1) return "yesterday’s";
-  if (days === 1) return "tomorrow’s";
-  return `${new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long" }).format(Date.parse(date))}’s`;
+  if (days === 0) return "today";
+  if (days === -1) return "yesterday";
+  if (days === 1) return "tomorrow";
+  return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long" }).format(Date.parse(date));
 }
 
 // An instant as a part of the day, said from the hour starting fromMs: “this
