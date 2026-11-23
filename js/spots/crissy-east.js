@@ -93,10 +93,12 @@ export default {
     station: "SFO", stationName: "SFO",
     // Inches in any 24 hours. Enough rain to wash runoff in (caution): 0.2″, where
     // Ventura County says runoff becomes a concern; SF publishes no number. Heavy rain
-    // (high): 0.5″, uncalibrated, with no published figure for SF’s sewer overflows.
+    // (a storm, which keeps a posting standing): 0.5″, uncalibrated, with no published
+    // figure for SF’s sewer overflows. Rain alone is never more than a caution.
     cautionIn: 0.2, highIn: 0.5,
     afterHours: 72,
-    // Forecast rain this far past the last measurement is too uncertain for High.
+    // Forecast heavy rain this far past the last measurement is too uncertain to keep a
+    // posting standing.
     sureForecastHours: 72,
     // Days of rain loaded before the first day shown: 72 hours, plus a 24-hour total.
     lookbackDays: 5,

@@ -267,17 +267,18 @@ export function endAfterRain(rain, fromMs, atLeast, hours) {
 //      72 hours from the sample, the overflow or the last heavy rain. Forecast rain more
 //      than 3 days past the last measurement doesn’t restart the clock. Without rain
 //      data, or a start to count from, a posting never ages.
-//   2. Heavy rain (≥ highIn in a day) in the last 72 hours → Recent rain (high); caution
-//      when it’s forecast more than 3 days past the last measurement.
-//   3. Light rain (≥ cautionIn) in the last 72 hours → Recent rain (caution).
-//   4. Posted but aged out, or a clean sample under 8 days old → OK (low).
-//   5. Anything else → unrated.
+//   2. Rain (≥ cautionIn in a day) in the last 72 hours → Recent rain (caution), measured
+//      or forecast, however heavy. Rain doesn’t always bring bacteria, and a storm can
+//      flush out what earlier rain washed in; only a sample shows what’s in the water,
+//      so rain alone puts swimmers on alert but never rates High.
+//   3. Posted but aged out, or a clean sample under 8 days old → OK (low).
+//   4. Anything else → unrated.
 //
-// Each card says, at most: when it changes (“Warning until Monday morning, after
+// Each card says, at most: when it changes (“Advisory until Monday morning, after
 // Thursday’s storm”, or “Until Tuesday afternoon, when rain is expected”), then what
-// SFPUC last said. Rain is “Recent rain” at either level: the rating says how bad, and
-// naming the storm ties the card to rain that may be days back, off the sky strip. Times are
-// parts of the day, not hours: they rest on forecasts.
+// SFPUC last said. Naming the storm (heavy rain, ≥ highIn in a day) or rain ties the
+// card to rain that may be days back, off the sky strip. Times are parts of the day,
+// not hours: they rest on forecasts.
 export function assessWaterQuality(quality, rain, startMs, spot) {
   const wq = spot.waterQuality, r = spot.rain, tz = spot.timeZone;
   const q = quality?.status ? quality : null;
@@ -315,19 +316,15 @@ export function assessWaterQuality(quality, rain, startMs, spot) {
   const freshClean = q?.status === "clean" && sampleAge <= wq.cleanForDays * 24 * H;
   const status = posted ?? (freshClean ? `Last sample, ${shortDate(q.sampled)}, was clean.`
     : q?.status === "unsampled" ? "SFPUC isn’t sampling here right now." : null);
-  // A warning lasts as long as heavy rain keeps it going; an advisory, as long as any
-  // rain does (heavy rain is rain too, so light’s stretch always covers heavy’s).
-  // The rain behind it is named by its day, as a storm when it was heavy.
-  const rainCard = (high, cause) => {
-    const ends = high ? endAfterRain(rain, heavy.endMs, r.highIn, r.afterHours)
-      : endAfterRain(rain, light.endMs, r.cautionIn, r.afterHours);
+  // An advisory lasts as long as any rain keeps it going (heavy rain is rain too, so
+  // light’s stretch always covers heavy’s). The rain behind it is named by its day, as a
+  // storm when it was heavy.
+  if (recent(light)) {
+    const cause = recent(heavy) ? heavy : light;
     const after = `${dayName(stormDay(rain, cause.endMs, tz), startMs, tz)} ${cause === heavy ? "storm" : "rain"}`;
-    return { level: high ? "high" : "caution", value: "Recent rain",
-      ...(high && { why: "Heavy rain in the last 3 days." }),
-      notes: [`${high ? "Warning" : "Advisory"} until ${until(ends)}, after ${after}.`, status].filter(Boolean) };
-  };
-  if (recent(heavy)) return rainCard(!unsure(heavy), heavy);
-  if (recent(light)) return rainCard(false, light);
+    return { level: "caution", value: "Recent rain",
+      notes: [`Advisory until ${until(endAfterRain(rain, light.endMs, r.cautionIn, r.afterHours))}, after ${after}.`, status].filter(Boolean) };
+  }
   if (posted || freshClean) {
     const next = nextRain(rain, startMs, r.cautionIn);
     return { level: "low", value: "OK",

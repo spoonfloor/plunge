@@ -134,23 +134,24 @@ test("water quality: light rain is an advisory until 72 hours after it stops", (
   assert.deepEqual(wq(clean, rainSeries({ "2026-11-17 23:00": 0.2 }), "2026-11-18 10:00").notes, ["Advisory until Friday night, after yesterday’s rain."]);
 });
 
-test("water quality: heavy rain is a warning, whatever the last sample said", () => {
+test("water quality: heavy rain is an advisory too: only a sample rates the water High", () => {
   const storm = rainSeries({ "2026-11-11 13:00": 0.3, "2026-11-11 14:00": 0.3 });
   const r = wq(clean, storm, "2026-11-12 10:00");
-  assert.deepEqual(r, { level: "high", value: "Recent rain", why: "Heavy rain in the last 3 days.",
-    notes: ["Warning until Saturday afternoon, after yesterday’s storm.", "Last sample, Nov 9, was clean."] });
+  assert.deepEqual(r, { level: "caution", value: "Recent rain",
+    notes: ["Advisory until Saturday afternoon, after yesterday’s storm.", "Last sample, Nov 9, was clean."] });
   assert.equal(overall({ current: { level: "low" }, waves: { level: "low" }, wind: { level: "low" }, waterTemp: { level: "low" },
-    waterQuality: r }).why, "Heavy rain in the last 3 days.");
+    waterQuality: r }).level, "caution");
   // With no posting or sampling, rain still rates the water.
-  assert.deepEqual(wq(null, storm, "2026-11-12 10:00").notes, ["Warning until Saturday afternoon, after yesterday’s storm."]);
+  assert.deepEqual(wq(null, storm, "2026-11-12 10:00").notes, ["Advisory until Saturday afternoon, after yesterday’s storm."]);
   assert.deepEqual(wq({ status: "unsampled", sampled: null }, storm, "2026-11-12 10:00").notes,
-    ["Warning until Saturday afternoon, after yesterday’s storm.", "SFPUC isn’t sampling here right now."]);
+    ["Advisory until Saturday afternoon, after yesterday’s storm.", "SFPUC isn’t sampling here right now."]);
 });
 
-test("water quality: forecast heavy rain is a warning up to 3 days out, an advisory past that", () => {
+test("water quality: forecast heavy rain is an advisory, near or far", () => {
   const recent = { status: "clean", sampled: "2026-11-20" };
-  assert.deepEqual(wq(recent, rainSeries({ "2026-11-22 10:00": 0.6 }), "2026-11-22 12:00").notes,
-    ["Warning until Wednesday morning, after today’s storm.", "Last sample, Nov 20, was clean."]);
+  const near = wq(recent, rainSeries({ "2026-11-22 10:00": 0.6 }), "2026-11-22 12:00");
+  assert.equal(near.level, "caution");
+  assert.deepEqual(near.notes, ["Advisory until Wednesday morning, after today’s storm.", "Last sample, Nov 20, was clean."]);
   const far = wq(recent, rainSeries({ "2026-11-25 10:00": 0.6 }), "2026-11-25 12:00");
   assert.equal(far.level, "caution");
   assert.equal(far.value, "Recent rain");
@@ -158,7 +159,7 @@ test("water quality: forecast heavy rain is a warning up to 3 days out, an advis
   // An advisory lasts through the lighter rain after the heavy, too.
   assert.equal(wq(recent, rainSeries({ "2026-11-25 10:00": 0.6, "2026-11-26 20:00": 0.25 }), "2026-11-25 12:00").notes[0],
     "Advisory until Sunday evening, after today’s storm.");
-  // Nor does it restart a posting’s clock: an aged-out posting stays below High.
+  // Past 3 days out, nor does it restart a posting’s clock: an aged-out posting stays below High.
   const aged = wq({ ...overflow, sinceMs: zq("2026-11-18 06:00") }, rainSeries({ "2026-11-18 09:00": 1, "2026-11-25 10:00": 0.6 }), "2026-11-25 12:00");
   assert.equal(aged.level, "caution");
   // Even when the posting’s start isn’t known: the measured storm still counts.
@@ -198,7 +199,7 @@ test("water quality: a storm is named by its wettest day", () => {
   // 1″ Wednesday, 0.6″ Thursday, a 0.3″ tail Friday morning: Wednesday’s storm, seen Saturday.
   const storm = rainSeries({ "2026-11-18 09:00": 1, "2026-11-19 09:00": 0.6, "2026-11-20 08:00": 0.3 });
   assert.equal(wq({ status: "clean", sampled: "2026-11-17" }, storm, "2026-11-21 10:00").notes[0],
-    "Warning until Monday morning, after Wednesday’s storm.");
+    "Advisory until Monday morning, after Wednesday’s storm.");
 });
 
 test("water quality: a bacteria posting is a warning for 72 hours after the sample, then OK", () => {
