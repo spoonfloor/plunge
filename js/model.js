@@ -236,12 +236,16 @@ export function assessWind(wind, spot) {
     notes: [windPush(wind.dir, spot.shoreFacingDeg)].filter(Boolean) };
 }
 
-// temp.estimate: a day ahead, carrying today’s reading.
+// temp.estimate: a day ahead, carrying the latest reading, which the note names by its
+// day (“Sun 22”, as on the sky line) since “today” reads wrong on a day ahead.
 export function assessWaterTemp(temp, spot) {
   if (!temp) return unknown("No water temperature reading for this hour.");
   const level = temp.f < spot.thresholds.waterTempF.caution ? "caution" : "low";
-  return { level, value: `${temp.estimate ? "~" : ""}${Math.round(temp.f)}°F`,
-    notes: temp.estimate ? ["Based on today’s reading. No forecast available."] : [] };
+  if (!temp.estimate) return { level, value: `${Math.round(temp.f)}°F`, notes: [] };
+  const { date } = zonedParts(temp.ms, spot.timeZone);
+  const day = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short" }).format(Date.parse(date));
+  return { level, value: `~${Math.round(temp.f)}°F`,
+    notes: [`Estimate based on the ${day} ${Number(date.slice(8))} reading, since water temperature isn’t forecast.`] };
 }
 
 // ---- Water quality ----------------------------------------------------------------

@@ -443,10 +443,12 @@ test("water level: the STOFS forecast where it reaches, the tide alone elsewhere
     ["Low 2.8 ft at 3:07 AM", "Tide only, without storm surge"]);
 });
 
-test("a day ahead marks today’s water temperature as an estimate, still rated", () => {
+test("a day ahead marks the latest water temperature as an estimate, named by its day, still rated", () => {
   assert.deepEqual(assessWaterTemp({ f: 61.6 }, spot), { level: "low", value: "62°F", notes: [] });
-  assert.deepEqual(assessWaterTemp({ f: 47.2, estimate: true }, spot),
-    { level: "caution", value: "~47°F", notes: ["Based on today’s reading. No forecast available."] });
+  // Read late on Sat 21 local time: the note names the day it was read, not UTC’s Sun 22.
+  assert.deepEqual(assessWaterTemp({ f: 47.2, ms: zonedToMs("2026-11-21 23:30", spot.timeZone), estimate: true }, spot),
+    { level: "caution", value: "~47°F",
+      notes: ["Estimate based on the Sat 21 reading, since water temperature isn’t forecast."] });
 });
 
 test("open-beach waves are rated on the height they break at", () => {
