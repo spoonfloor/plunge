@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { currentAt, peakCurrent, transferFactor, assessCurrent, assessWaves, assessWind, windPush, overall, summarizeDay, hourSpan,
   assessWaterQuality, waterAdvisories, advisorySummary, advisoryParagraphs, currentKnots, thresholds, showsRain, skyKind, skyLine, skyText,
-  tideAt, assessTide, feet, partOfDay, assessWaterTemp, breakerFt } from "../js/model.js";
+  tideAt, levelAt, highsAndLows, assessTide, feet, partOfDay, assessWaterTemp, breakerFt } from "../js/model.js";
 import { sunIsUp } from "../js/time.js";
 import { forDate, spreadRain, worstPosting } from "../js/sources.js";
 import spot from "../js/spots/crissy-east.js";
@@ -386,18 +386,51 @@ test("tide: half a cosine between highs and lows, unrated, with the next turn", 
   assert.equal(tideAt(turns, z("2026-11-18 06:45")), 4.94);
   assert.ok(Math.abs(tideAt(turns, z("2026-11-18 09:45")) - (4.94 - 0.6) / 2) < 1e-9); // halfway
   assert.equal(tideAt(turns, z("2026-11-18 05:00")), null);
-  const t = assessTide(turns, z("2026-11-18 09:00"), spot);
+  const tide = { turns, levels: null };
+  const t = assessTide(tide, z("2026-11-18 09:00"), spot);
   assert.equal(t.level, "unrated");
   assert.equal(t.trend, "Falling");
   assert.match(t.value, /^\d\.\d ft ↓$/);
-  assert.deepEqual(t.notes, ["Low −0.6 ft at 12:45 PM"]);
-  assert.equal(assessTide(turns, z("2026-11-18 14:00"), spot).trend, "Rising");
-  assert.equal(assessTide(turns, z("2026-11-18 19:00"), spot).level, "unknown");
+  assert.deepEqual(t.notes, ["Low −0.6 ft at 12:45 PM", "Tide only, without storm surge"]);
+  assert.equal(assessTide(tide, z("2026-11-18 14:00"), spot).trend, "Rising");
+  assert.equal(assessTide(tide, z("2026-11-18 19:00"), spot).level, "unknown");
   assert.equal(feet(-0.04), "0.0");
   // Tide never moves the rating.
   const f = { current: { level: "low" }, waves: { level: "low" }, wind: { level: "low" }, waterTemp: { level: "low" },
     tide: t, waterQuality: { level: "low" } };
   assert.equal(overall(f).level, "low");
+});
+
+test("water level: the STOFS forecast where it reaches, the tide alone elsewhere", () => {
+  const z = t => zonedToMs(t, spot.timeZone);
+  const turns = [{ ms: z("2026-11-22 22:34"), ft: 4.8, type: "high" }, { ms: z("2026-11-23 03:07"), ft: 2.5, type: "low" },
+    { ms: z("2026-11-23 09:25"), ft: 6.7, type: "high" },
+    { ms: z("2026-11-23 16:18"), ft: -1.1, type: "low" }];
+  // Half-hourly forecast from 2 AM to 4:30 PM: a high near 9, about a foot over the tide.
+  const levels = [3.6, 3.4, 3.4, 3.5, 3.7, 4.1, 4.6, 5.1, 5.6, 6.2, 6.8, 7.2, 7.5, 7.7, 7.8, 7.7, 7.4, 7.0, 6.5, 5.9, 5.2,
+    4.4, 3.6, 2.8, 2.0, 1.3, 0.7, 0.2, -0.2, -0.5].map((ft, k) => ({ ms: z("2026-11-23 02:00") + k * 1800e3, ft }));
+  const tide = { turns, levels };
+  // Through each forecast value exactly, smooth between.
+  assert.ok(Math.abs(levelAt(tide, z("2026-11-23 09:00")) - 7.8) < 1e-9);
+  const between = levelAt(tide, z("2026-11-23 08:45"));
+  assert.ok(between > 7.7 && between < 7.8);
+  // Outside the forecast, the tide alone; near its ends, fading from one to the other.
+  assert.equal(levelAt(tide, z("2026-11-23 01:00")), tideAt(turns, z("2026-11-23 01:00")));
+  const edge = z("2026-11-23 03:30"), w = 0.5; // an hour and a half into the 3-hour fade
+  assert.ok(Math.abs(levelAt(tide, edge) - (tideAt(turns, edge) + (3.5 - tideAt(turns, edge)) * w)) < 1e-9);
+  // A high keeps the tide’s time and takes the water level then.
+  const high = highsAndLows(tide)[2];
+  assert.equal(high.ms, z("2026-11-23 09:25"));
+  assert.ok(high.ft > 7.7 && high.ft < 7.8);
+
+  const warning = { event: "Coastal Flood Warning", onsetMs: z("2026-11-23 06:00"), endsMs: z("2026-11-26 16:00") };
+  const surf = { event: "High Surf Warning", onsetMs: z("2026-11-23 06:00"), endsMs: z("2026-11-26 16:00") };
+  const t = assessTide(tide, z("2026-11-23 08:00"), spot, [surf, warning]);
+  assert.equal(t.value, "7.5 ft ↑");
+  assert.deepEqual(t.notes, ["High 7.7 ft at 9:25 AM", "Forecast with storm surge", "Coastal flood warning in effect"]);
+  // Before the warning starts, no flood note; before the forecast, tide only.
+  assert.deepEqual(assessTide(tide, z("2026-11-23 01:00"), spot, [warning]).notes,
+    ["Low 2.8 ft at 3:07 AM", "Tide only, without storm surge"]);
 });
 
 test("a day ahead marks today’s water temperature as an estimate, still rated", () => {

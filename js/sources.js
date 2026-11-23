@@ -238,19 +238,29 @@ const FETCHERS = {
       link: `https://tidesandcurrents.noaa.gov/noaacurrents/predictions?id=${station}_1` };
   },
 
-  // NOAA high and low tides from the day before the first day to the day after the last,
-  // so every hour shown sits between two of them. One list, not by day; model.js draws
-  // the water level between them.
+  // The water level, as { turns, levels }. turns: NOAA’s predicted highs and lows from
+  // the day before the first day to the day after the last, which time each high and
+  // low. levels: NOAA’s STOFS forecast of the water level at the same gauge, tide and
+  // storm surge together, every 30 minutes from yesterday on ({ ms, ft }), through
+  // Plunge’s server function; null when it doesn’t load. model.js reads the level from
+  // levels where they reach and from the highs and lows (tide only) elsewhere.
   async tide(spot, dates) {
     const { station, stationName } = spot.tide;
-    const json = await getJson(withQuery(COOPS, {
-      ...COOPS_COMMON, product: "predictions", station, interval: "hilo", datum: "MLLW",
-      begin_date: compact(addDays(dates[0], -1)), end_date: compact(addDays(dates.at(-1), 1)),
-    }));
-    const data = json.predictions.map(p => ({
+    const [json, stofs] = await Promise.all([
+      getJson(withQuery(COOPS, {
+        ...COOPS_COMMON, product: "predictions", station, interval: "hilo", datum: "MLLW",
+        begin_date: compact(addDays(dates[0], -1)), end_date: compact(addDays(dates.at(-1), 1)),
+      })),
+      getJson(`${SERVER}/water-level`).catch(() => null),
+    ]);
+    const turns = json.predictions.map(p => ({
       ms: zonedToMs(p.t, spot.timeZone), ft: Number(p.v), type: p.type === "H" ? "high" : "low",
     })).sort((a, b) => a.ms - b.ms);
-    return { data, label: `NOAA tide predictions, ${stationName} (${station})`,
+    const levels = stofs?.points.length ? stofs.points.map(p => ({ ms: Date.parse(p.time), ft: p.ft })) : null;
+    return { data: { turns, levels },
+      label: levels
+        ? `NOAA STOFS water level forecast (tide and storm surge), San Francisco gauge, latest run ${stofs.runs.at(-1)}; high and low times from NOAA tide predictions, ${stationName} (${station})`
+        : `NOAA tide predictions, ${stationName} (${station}): tide only, without storm surge (the water level forecast didn’t load)`,
       link: `https://tidesandcurrents.noaa.gov/stationhome.html?id=${station}` };
   },
 
@@ -511,7 +521,7 @@ const FETCHERS = {
 
 // Names for sources that failed before ever loading.
 const NAMES = {
-  currents: "NOAA current predictions", tide: "NOAA tide predictions",
+  currents: "NOAA current predictions", tide: "NOAA tide predictions and water level forecast",
   waterTemp: "NOAA water temperature", waves: "NWS nearshore wave forecast",
   wind: "National Weather Service hourly forecast", sky: "National Weather Service forecast",
   windObserved: "NOAA measured wind", skyObserved: "NWS observations",
@@ -530,7 +540,8 @@ export function forDate(data, date) {
 // The version goes up when a source’s data changes shape, so an old saved copy is never
 // read as the new one. v2: tide became a list of highs and lows. v3: water quality
 // carries today’s posting into days ahead. v4: each hour’s sky carries its air temperature.
-const cacheKey = (spot, key) => `plunge:v4:${spot.id}:${key}`;
+// v5: tide became { turns, levels }.
+const cacheKey = (spot, key) => `plunge:v5:${spot.id}:${key}`;
 function readCache(spot, key, dates) {
   try {
     const saved = JSON.parse(localStorage.getItem(cacheKey(spot, key)));

@@ -10,8 +10,10 @@
 //
 // It also keeps a record of what sources forget: every hour, cron on the server calls
 // /collect, which saves each beach’s water quality posting (SFPUC keeps no history) and
-// Crissy East’s latest wave run (runs vanish after about two days) to the
-// plunge.history table. /history?date=&spot= reads a past day back, and
+// Crissy East’s latest wave run (runs vanish after about two days), and each STOFS water
+// level run at the tide gauge (NOMADS keeps about a day of them), to the
+// plunge.history table. /history?date=&spot= reads a past day back, /water-level
+// stitches the saved STOFS runs into one series, and
 // /posted-since?spot= says how long the current posting has stood. Routes that take a
 // spot answer for Crissy East without one, and name the spot they answer for.
 
@@ -38,6 +40,8 @@ const ROUTES: Record<string, { cacheMs: number; bySpot?: boolean; load: (spot: s
   // service that limits how often one address asks, so every phone shares one copy.
   "rain": { cacheMs: 30 * 60e3, load: rain },
   "posted-since": { cacheMs: 10 * 60e3, bySpot: true, load: postedSince },
+  // Stitched from the STOFS runs /collect saves (a new one about every 6 hours).
+  "water-level": { cacheMs: 30 * 60e3, load: waterLevel },
 };
 const cache = new Map<string, { at: number; body: unknown }>();
 async function cached(route: string, spot = DEFAULT_SPOT) {
@@ -174,6 +178,88 @@ async function waves() {
 }
 const round4 = (x: number) => Math.round(x * 1e4) / 1e4;
 
+// Water level forecast at the San Francisco (Presidio) tide gauge from NOAA’s Surge
+// and Tide Operational Forecast System (STOFS-2D-Global): tide and storm surge
+// together, corrected toward what the gauge has been reading, in feet above MLLW every
+// 30 minutes for about seven days. Each run’s station forecasts come as a SHEF text
+// file (about 2 MB); only the gauge’s block is kept. NWS calls the gauge FTPC1 (Fort Point); NOAA calls it 9414290.
+const STOFS = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/stofs/prod";
+const STOFS_STATION = "FTPC1";
+
+// The runs NOMADS still has (it keeps about a day), newest first: 18Z, 12Z, 06Z and
+// 00Z, today and yesterday (UTC). A run’s file appears a few hours after its start.
+function stofsRuns() {
+  const now = Date.now(), runs: { day: string; hh: string; run: string }[] = [];
+  for (const back of [0, 1]) {
+    const day = new Date(now - back * 864e5).toISOString().slice(0, 10).replaceAll("-", "");
+    for (const hh of ["18", "12", "06", "00"]) {
+      const run = `${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6)}T${hh}:00:00Z`;
+      if (Date.parse(run) < now) runs.push({ day, hh, run });
+    }
+  }
+  return runs;
+}
+
+// One run’s forecast at the gauge, or null when its file isn’t there (yet, or anymore).
+async function stofsRun({ day, hh, run }: { day: string; hh: string; run: string }) {
+  const res = await fetch(`${STOFS}/stofs_2d_glo.${day}/stofs_2d_glo.t${hh}z.points.cwl.shef`);
+  if (!res.ok) { await res.body?.cancel(); return null; }
+  return { run, station: STOFS_STATION, points: readShef(await res.text(), STOFS_STATION) };
+}
+type StofsRun = { run: string; station: string; points: { time: string; ft: number }[] };
+
+// The water level from yesterday on, from the runs /collect has saved: at each half
+// hour, the newest run that reaches it. Where a newer run takes over, it fades in over
+// a few hours, so the line doesn’t step from one run to the next.
+const FADE_MS = 3 * 3600e3;
+async function waterLevel() {
+  const from = local(Date.now() - 3 * 864e5).date;
+  const rows = await db(`?spot=eq.${DEFAULT_SPOT}&kind=eq.waterLevelForecast&date=gte.${from}&select=value`) as { value: StofsRun }[];
+  const runs = rows.map(r => ({ run: r.value.run, startMs: Date.parse(r.value.run),
+    ft: new Map(r.value.points.map(p => [Date.parse(p.time), p.ft])) })).sort((a, b) => a.startMs - b.startMs);
+  if (!runs.length) throw new Error("No STOFS runs saved yet");
+  const since = Date.now() - 2 * 864e5;
+  const times = [...new Set(runs.flatMap(r => [...r.ft.keys()]))].filter(ms => ms >= since).sort((a, b) => a - b);
+  const points = times.map(ms => {
+    let ft: number | null = null;
+    for (const r of runs) {
+      const v = r.ft.get(ms);
+      if (v === undefined) continue;
+      ft = ft === null ? v : ft + (v - ft) * Math.min(1, (ms - r.startMs) / FADE_MS);
+    }
+    return { time: new Date(ms).toISOString(), ft: Math.round(ft! * 100) / 100 };
+  });
+  return { model: "NOAA STOFS-2D-Global, combined water level", station: STOFS_STATION,
+    runs: runs.map(r => r.run), points };
+}
+
+// One station’s series from a SHEF file: “.E FTPC1 20261122 Z DH0000/DC…/HMIFC/DIN30/ 1.70/ 2.00/…”,
+// then “.E1 …”, “.E2 …” lines of more values. DH is the first value’s UTC hour and
+// minute, DIN the minutes between values. → [{ time, ft }], missing values left out.
+function readShef(text: string, station: string) {
+  const lines = text.split("\n");
+  const start = lines.findIndex(l => l.startsWith(`.E ${station} `));
+  if (start < 0) throw new Error(`Station ${station} not in the STOFS run`);
+  const head = lines[start].match(/^\.E \S+ (\d{4})(\d\d)(\d\d) Z DH(\d\d)(\d\d)\/.*?\/DIN(\d+)\/(.*)$/);
+  if (!head) throw new Error(`Unexpected STOFS line: ${lines[start].slice(0, 80)}`);
+  const [, y, mo, d, h, mi, step, rest] = head;
+  const values = rest.split("/");
+  for (const line of lines.slice(start + 1)) {
+    const more = line.match(/^\.E\d+\s+(.*)$/);
+    if (!more) break;
+    values.push(...more[1].split("/"));
+  }
+  const t0 = Date.UTC(+y, +mo - 1, +d, +h, +mi), stepMs = +step * 60e3;
+  const points: { time: string; ft: number }[] = [];
+  values.map(v => v.trim()).filter(Boolean).forEach((v, k) => {
+    const ft = Number(v);
+    // SHEF marks a missing value with M or -9999.
+    if (Number.isFinite(ft) && ft > -99) points.push({ time: new Date(t0 + k * stepMs).toISOString(), ft });
+  });
+  if (!points.length) throw new Error(`No water levels for ${station} in the STOFS run`);
+  return points;
+}
+
 // Measured rain at SFO, the nearest NWS gauge to the beach (about 17 km south), by
 // hour for the last 8 days: the hourly METAR’s precipitation, from the Iowa
 // Environmental Mesonet’s archive. Each hour is the one a report at :56 closes.
@@ -253,6 +339,19 @@ async function collect() {
       if (ms > since && ms <= Date.now()) rows.push({ spot: DEFAULT_SPOT, kind: "waves", ...local(ms), value: { ft, run: run.run } });
     }
   } catch (err) { errors.waves = (err as Error).message; }
+  // Each STOFS run still on NOMADS that isn’t saved yet, whole, filed under its start
+  // time: /water-level stitches them together, and they’re the record to score the
+  // forecast against what the gauge measured (NOAA keeps the gauge’s own record).
+  try {
+    const saved = new Set((await db(`?spot=eq.${DEFAULT_SPOT}&kind=eq.waterLevelForecast&date=gte.${local(Date.now() - 3 * 864e5).date}` +
+      `&select=value->>run`) as { run: string }[]).map(r => r.run));
+    for (const candidate of stofsRuns().filter(r => !saved.has(r.run))) {
+      try {
+        const run = await stofsRun(candidate);
+        if (run) rows.push({ spot: DEFAULT_SPOT, kind: "waterLevelForecast", ...local(Date.parse(run.run)), value: run });
+      } catch (err) { errors[`waterLevelForecast:${candidate.run}`] = (err as Error).message; }
+    }
+  } catch (err) { errors.waterLevelForecast = (err as Error).message; }
   if (rows.length) {
     await db("?on_conflict=spot,kind,date,hour", { method: "POST", body: JSON.stringify(rows),
       headers: { Prefer: "resolution=merge-duplicates,return=minimal" } });

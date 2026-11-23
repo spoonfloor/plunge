@@ -4,7 +4,7 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 import { SPOTS } from "./spots/index.js";
 import { forDate, loadAll } from "./sources.js";
 import { advisoryParagraphs, advisorySummary, assessHour, currentAt, feet, showsRain, skyKind, skyLine, summarizeDay, thresholds,
-  tideAt, waterAdvisories } from "./model.js";
+  highsAndLows, levelAt, waterAdvisories } from "./model.js";
 import { addDays, hourLabel, zonedParts, zonedToMs } from "./time.js";
 
 // The days you can swipe between: yesterday, today and five ahead. Five is as far as
@@ -528,12 +528,13 @@ function dayCurve(key, selected, hours, events = null) {
 // same graph again after each redraw.
 const scrubAttrs = (key, first, step) => ({ "data-graph": key, "data-first": first, "data-step": step });
 
-// The day’s water level, drawn like the factor curves but unrated: a smooth line from
-// NOAA’s highs and lows, shaded beneath, with a dashed line at 0 ft (MLLW; lows go
+// The day’s water level, drawn like the factor curves but unrated: a smooth line
+// (the STOFS forecast, surge and all, or the tide alone where that doesn’t reach; see
+// levelAt), shaded beneath, with a dashed line at 0 ft (MLLW; lows go
 // below it), each high and low in the window marked with its height and time, and a
 // dot at the selected hour.
-function tideCurve(turns, date, selected, hours) {
-  if (!turns) return null;
+function tideCurve(tide, date, selected, hours) {
+  if (!tide) return null;
   const W = 300, H = 140, plotW = W - 34, top = 26, bottom = 104;
   const first = hours[0].hour, last = hours.at(-1).hour;
   const startMs = zonedToMs(`${date} ${first}:00`, spot.timeZone);
@@ -541,12 +542,12 @@ function tideCurve(turns, date, selected, hours) {
   const x = ms => ((ms - startMs) / (endMs - startMs)) * plotW;
   // Every ten minutes is smooth at this size.
   const samples = [];
-  for (let ms = startMs; ms <= endMs; ms += 10 * 60e3) samples.push([ms, tideAt(turns, ms)]);
+  for (let ms = startMs; ms <= endMs; ms += 10 * 60e3) samples.push([ms, levelAt(tide, ms)]);
   if (samples.some(([, ft]) => ft === null)) return null;
   const lo = Math.min(0, ...samples.map(([, ft]) => ft)), hi = Math.max(...samples.map(([, ft]) => ft));
   const y = ft => bottom - ((ft - lo) / (hi - lo || 1)) * (bottom - top);
   const line = samples.map(([ms, ft]) => `${x(ms).toFixed(1)},${y(ft).toFixed(1)}`).join(" ");
-  const inWindow = turns.filter(t => t.ms >= startMs && t.ms <= endMs);
+  const inWindow = highsAndLows(tide).filter(t => t.ms >= startMs && t.ms <= endMs);
   const short = ms => clock(ms).replace(/\s?[AP]M$/, "");
   // Labels near either end lean inward so they stay inside the card.
   const anchor = px => px < 40 ? "start" : px > plotW - 40 ? "end" : "middle";
@@ -566,7 +567,7 @@ function tideCurve(turns, date, selected, hours) {
       svg("circle", { cx: x(t.ms), cy: y(t.ft), r: 3.5, class: "turn" }),
       svg("text", { x: x(t.ms), y: y(t.ft) + (t.type === "high" ? -9 : 16), "text-anchor": anchor(x(t.ms)), class: "turn-label" },
         `${feet(t.ft)} ft · ${short(t.ms)}`)]),
-    si >= 0 ? svg("circle", { cx: x(selMs), cy: y(tideAt(turns, selMs)), r: 5, class: "dot unrated" }) : null,
+    si >= 0 ? svg("circle", { cx: x(selMs), cy: y(levelAt(tide, selMs)), r: 5, class: "dot unrated" }) : null,
     axis(0, hourLabel(first), "start"),
     nearEnd ? null : axis(x(selMs), hourLabel(selected), "middle"),
     axis(plotW, hourLabel(last), "end"));

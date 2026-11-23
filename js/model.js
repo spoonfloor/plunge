@@ -90,7 +90,7 @@ export function assessCurrent(events, startMs, spot) {
 
 // ---- Tide -------------------------------------------------------------------------
 
-// The water level (feet above MLLW) at an instant, from NOAA’s highs and lows
+// The tide (feet above MLLW) at an instant, from NOAA’s highs and lows
 // ({ ms, ft, type }, in time order): half a cosine from each one to the next, the way
 // tide tables are read between their entries. Null outside the list.
 export function tideAt(turns, ms) {
@@ -100,19 +100,58 @@ export function tideAt(turns, ms) {
   return a.ft + (b.ft - a.ft) * (1 - Math.cos(Math.PI * (ms - a.ms) / (b.ms - a.ms))) / 2;
 }
 
+// The water level (feet above MLLW) at an instant, from tide as sources.js gives it
+// ({ turns, levels }): the STOFS forecast where its levels reach, drawn as a smooth
+// curve through its half-hourly values (Catmull–Rom); NOAA’s highs and lows, tide
+// only, elsewhere. Near either end of the forecast the two fade into each other over a
+// few hours, so the line doesn’t jump where the forecast starts or stops (as for
+// yesterday, when the server hasn’t kept the runs that reach back that far). Null
+// where neither reaches.
+export function levelAt(tide, ms) {
+  const i = levelIndex(tide.levels, ms), only = tideAt(tide.turns, ms);
+  if (i < 0) return only;
+  const L = tide.levels, p = k => L[Math.min(L.length - 1, Math.max(0, k))].ft;
+  const f = (ms - L[i].ms) / (L[i + 1].ms - L[i].ms);
+  const [p0, p1, p2, p3] = [p(i - 1), p(i), p(i + 1), p(i + 2)];
+  const forecast = p1 + 0.5 * f * (p2 - p0 + f * (2 * p0 - 5 * p1 + 4 * p2 - p3 + f * (3 * (p1 - p2) + p3 - p0)));
+  return only === null ? forecast : only + (forecast - only) * surgeWeight(L, ms);
+}
+// Whether the number at the instant is mostly the STOFS forecast, surge and all,
+// rather than the tide alone.
+export const hasSurge = (tide, ms) => levelIndex(tide.levels, ms) >= 0 && surgeWeight(tide.levels, ms) >= 0.5;
+const EDGE_FADE_MS = 3 * 3600e3;
+const surgeWeight = (levels, ms) => Math.min(1, (ms - levels[0].ms) / EDGE_FADE_MS, (levels.at(-1).ms - ms) / EDGE_FADE_MS);
+// The level just before ms, when ms sits between two levels.
+function levelIndex(levels, ms) {
+  if (!levels || levels.length < 2 || ms < levels[0].ms || ms > levels.at(-1).ms) return -1;
+  return Math.min(levels.length - 2, levels.findLastIndex(l => l.ms <= ms));
+}
+
+// NOAA’s highs and lows, each at the water level then: the time is the tide’s, the
+// height includes the surge where the forecast reaches. That’s how NWS states a high
+// in a coastal flood forecast (the tide’s time, the tide plus the surge’s height).
+export const highsAndLows = tide => tide.turns.map(t => ({ ...t, ft: levelAt(tide, t.ms) ?? t.ft }));
+
 // Tide isn’t rated: it’s shown for planning. Level “unrated”, with whether it’s rising
-// or falling where a rating would go, and the next high or low.
-export function assessTide(turns, startMs, spot) {
-  const ft = tideAt(turns, startMs);
+// or falling where a rating would go, the next high or low, whether surge is in the
+// number, and any coastal flood warning or advisory in force (from NWS alerts).
+export function assessTide(tide, startMs, spot, alerts = []) {
+  const ft = levelAt(tide, startMs);
   if (ft === null) return unknown("No tide prediction covers this hour.");
-  const next = turns.find(t => t.ms > startMs);
+  const next = highsAndLows(tide).find(t => t.ms > startMs);
+  if (!next) return unknown("No tide prediction covers this hour.");
   const rising = next.type === "high";
+  const flood = (alerts ?? []).find(a => /coastal flood/i.test(a.event) && a.onsetMs <= startMs && (!a.endsMs || a.endsMs > startMs));
   return {
     level: "unrated",
     amount: ft,
     trend: rising ? "Rising" : "Falling",
     value: `${feet(ft)} ft ${rising ? "↑" : "↓"}`,
-    notes: [`${rising ? "High" : "Low"} ${feet(next.ft)} ft at ${clockTime(next.ms, spot.timeZone)}`],
+    notes: [
+      `${rising ? "High" : "Low"} ${feet(next.ft)} ft at ${clockTime(next.ms, spot.timeZone)}`,
+      hasSurge(tide, startMs) ? "Forecast with storm surge" : "Tide only, without storm surge",
+      flood ? `${flood.event.charAt(0)}${flood.event.slice(1).toLowerCase()} in effect` : null,
+    ].filter(Boolean),
   };
 }
 // Feet to a tenth, with a true minus sign: “−0.6”.
@@ -497,7 +536,7 @@ export function assessHour(hour, startMs, data, spot) {
     waves: data.waves ? assessWaves(data.waves[hour], spot) : unknown("Wave forecast didn’t load."),
     // Measured where the hour has passed, forecast otherwise.
     wind: assessWind(data.windObserved?.[hour] ?? data.wind?.[hour], spot),
-    tide: data.tide ? assessTide(data.tide, startMs, spot) : unknown("Tide predictions didn’t load."),
+    tide: data.tide ? assessTide(data.tide, startMs, spot, data.alerts) : unknown("Tide predictions didn’t load."),
     waterTemp: data.waterTemp ? assessWaterTemp(data.waterTemp[hour], spot) : unknown("Water temperature didn’t load."),
     waterQuality: assessWaterQuality(data.waterQuality, data.rain, startMs, spot),
   };
