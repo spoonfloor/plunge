@@ -9,7 +9,7 @@
 create schema if not exists plunge;
 grant usage on schema plunge to service_role;
 
--- What sources forget, one row per spot, kind (waterQuality, waves, waterLevelForecast),
+-- What sources forget, one row per spot, kind (waterQuality, waves, waterLevelForecast, rain),
 -- date and local hour, with the reading as JSON. Before this schema the table was public.plunge_history;
 -- move it here, rows and all, if it’s still there.
 do $$

@@ -13,12 +13,26 @@ const COOPS = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter";
 const SERVER = "https://supabase.erichenry.com/functions/v1/plunge";
 const COOPS_COMMON = { units: "english", time_zone: "lst_ldt", format: "json", application: "plunge" };
 
-async function getJson(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
-  if (json.error) throw new Error(json.error.message ?? String(json.error));
-  return json;
+// tries: how many times to ask, waiting 1 s, then 2 s, between them, when the network
+// fails, the request takes longer than timeoutMs, or the answer is 429 or 5xx. A
+// source that answers but says no (any other status, or an error in the JSON) isn’t
+// asked again.
+async function getJson(url, { tries = 1, timeoutMs } = {}) {
+  for (let attempt = 1; ; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {});
+    } catch (err) {
+      if (attempt >= tries) throw err;
+    }
+    if (res && (res.ok || attempt >= tries || (res.status !== 429 && res.status < 500))) {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      if (json.error) throw new Error(json.error.message ?? String(json.error));
+      return json;
+    }
+    await new Promise(r => setTimeout(r, 1000 * 2 ** (attempt - 1)));
+  }
 }
 const withQuery = (base, params) => `${base}?${new URLSearchParams(params)}`;
 
@@ -414,9 +428,9 @@ const FETCHERS = {
   // Rain by hour, measured where it has fallen and forecast after that, as one series:
   // { startMs, inches: [one per hour from startMs], observedUntilMs, gauge }. It starts
   // spot.rain.lookbackDays before the first day, so a day’s first hours can see the rain
-  // before them. Measured: SFO’s gauge through the server; Open-Meteo’s model where that
-  // fails. Forecast: the NWS gridpoint rainfall, each 6-hour total spread over its hours
-  // (see spreadRain); Open-Meteo where that fails. Model and forecast amounts are kept
+  // before them. Measured: SFO’s gauge through the server (see gaugeRain); with no
+  // measurement there’s no series. Forecast: the NWS gridpoint rainfall, each 6-hour total
+  // spread over its hours (see spreadRain); Open-Meteo where that fails. Forecast amounts are kept
   // to the gauge’s hundredths, so a forecast hour is dry or wet the way a measured one is.
   async rain(spot, dates, shared) {
     const startMs = zonedToMs(`${addDays(dates[0], -spot.rain.lookbackDays)} 00:00`, spot.timeZone);
@@ -430,25 +444,17 @@ const FETCHERS = {
     })).then(j => j.hourly.time.map((t, i) => ({ ms: Date.parse(`${t}:00Z`),
       in: Math.round((j.hourly.precipitation[i] ?? 0) * 100) / 100 })));
 
-    let observedUntilMs, measured;
-    try {
-      const json = await getJson(`${SERVER}/rain`);
-      for (const h of json.hours) {
-        const i = index(Date.parse(h.time));
-        if (i >= 0 && i < inches.length) inches[i] = h.in;
-      }
-      // The hour after the last report: the first one nobody has measured yet.
-      const through = Date.parse(json.through);
-      observedUntilMs = through - through % HOUR + HOUR;
-      measured = `measured at ${spot.rain.stationName}`;
-    } catch {
-      observedUntilMs = Date.now() - Date.now() % HOUR;
-      for (const h of await openMeteo()) {
-        const i = index(h.ms);
-        if (i >= 0 && i < inches.length && h.ms < observedUntilMs) inches[i] = h.in;
-      }
-      measured = "modeled by Open-Meteo (SFO’s gauge didn’t load)";
+    // Without the gauge this fails: a model’s guess at rain that has fallen isn’t
+    // evidence to rate the water on (it once put 0.23″ on an evening SFO measured 0.06″).
+    const json = await gaugeRain(spot);
+    for (const h of json.hours) {
+      const i = index(Date.parse(h.time));
+      if (i >= 0 && i < inches.length) inches[i] = h.in;
     }
+    // The hour after the last report: the first one nobody has measured yet.
+    const through = Date.parse(json.through);
+    const observedUntilMs = through - through % HOUR + HOUR;
+    const measured = `measured at ${spot.rain.stationName}`;
 
     let forecast = "NWS rainfall forecast";
     const fill = (ms, amount) => {
@@ -542,6 +548,24 @@ export function forDate(data, date) {
 // carries today’s posting into days ahead. v4: each hour’s sky carries its air temperature.
 // v5: tide became { turns, levels }.
 const cacheKey = (spot, key) => `plunge:v5:${spot.id}:${key}`;
+
+// The gauge’s measured rain from the server (see server/functions/plunge), asked up to
+// three times. When it can’t be had, the last copy this browser got stands in, as long
+// as it reaches within 6 hours of now: what was measured stays measured, and the hours
+// after it are left to the forecast.
+async function gaugeRain(spot) {
+  const key = `plunge:gauge:${spot.rain.station}`;
+  try {
+    const json = await getJson(`${SERVER}/rain`, { tries: 3, timeoutMs: 20e3 });
+    try { localStorage.setItem(key, JSON.stringify(json)); } catch { /* storage unavailable */ }
+    return json;
+  } catch (err) {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(key)); } catch { /* storage unavailable */ }
+    if (saved?.hours && Date.now() - Date.parse(saved.through) <= 6 * HOUR) return saved;
+    throw err;
+  }
+}
 function readCache(spot, key, dates) {
   try {
     const saved = JSON.parse(localStorage.getItem(cacheKey(spot, key)));

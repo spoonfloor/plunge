@@ -324,7 +324,7 @@ export function assessWaterQuality(quality, rain, startMs, spot) {
   const sampleMs = q?.sampled ? zonedToMs(`${q.sampled} ${String(wq.sampleHour).padStart(2, "0")}:00`, tz) : null;
   // A stretch ending at ms lasts through the hour before it.
   const until = ms => partOfDay(ms - 1, startMs, tz);
-  const noRain = rain ? null : "Rain data didn’t load.";
+  const noRain = rain ? null : "Recent rainfall can affect water quality, but was not considered because of an error loading the data.";
   const newer = x => x && (sampleMs == null || x.endMs > sampleMs) ? x : null;
   const heavy = newer(lastRain(rain, startMs, r.highIn)), light = newer(lastRain(rain, startMs, r.cautionIn));
   const unsure = x => x?.forecast && startMs - rain.observedUntilMs > r.sureForecastHours * H;
